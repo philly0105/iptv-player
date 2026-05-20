@@ -220,6 +220,30 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Internal server error' });
 });
 
+// Seed a default Xtream source on first launch if env vars are set.
+// Set IPTV_DEFAULT_HOST / USER / PASS in .env — never committed to git.
+async function seedDefaultSource() {
+    const host = process.env.IPTV_DEFAULT_HOST;
+    const username = process.env.IPTV_DEFAULT_USER;
+    const password = process.env.IPTV_DEFAULT_PASS;
+    if (!host || !username || !password) return;
+    try {
+        const db = require('./db');
+        const existing = await db.sources.getAll();
+        if (existing.length > 0) return;
+        await db.sources.create({
+            name: process.env.IPTV_DEFAULT_NAME || 'My IPTV',
+            type: 'xtream',
+            url: host,
+            username,
+            password,
+        });
+        console.log('✓ Default IPTV source added');
+    } catch (err) {
+        console.warn('Could not seed default source:', err.message);
+    }
+}
+
 app.listen(PORT, async () => {
     console.log(`IPTV Player server running on http://localhost:${PORT}`);
 
@@ -227,6 +251,9 @@ app.listen(PORT, async () => {
     await loadPlugins().catch(err => {
         console.error('Plugin initialization failed:', err);
     });
+
+    // Seed default source then sync
+    await seedDefaultSource();
 
     // Trigger background sync with delay to allow server to settle
     setTimeout(async () => {
