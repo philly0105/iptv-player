@@ -113,9 +113,15 @@ router.post('/setup',
 // requireLocalhost enforces the loopback-only restriction using the raw socket address.
 router.get('/autologin', requireLocalhost, async (req, res) => {
     try {
-        const allUsers = await db.users.getAll();
-        const user = allUsers[0];
-        if (!user) return res.redirect('/login.html');
+        let allUsers = await db.users.getAll();
+        let user = allUsers[0];
+
+        // First launch — no users yet. Auto-create a local admin so setup is skipped.
+        if (!user) {
+            const passwordHash = await auth.hashPassword('admin');
+            user = await db.users.create({ username: 'admin', passwordHash, role: 'admin' });
+        }
+
         const token = auth.generateToken(user);
         res.send(`<!DOCTYPE html><html><head><script>
 localStorage.setItem('authToken',${JSON.stringify(token)});
