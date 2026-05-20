@@ -136,9 +136,15 @@ window.location.replace('/');
 // JSON token endpoint — called by app.js checkAuth to skip the login screen.
 router.get('/localtoken', requireLocalhost, async (req, res) => {
     try {
-        const allUsers = await db.users.getAll();
-        const user = allUsers[0];
-        if (!user) return res.status(404).json({ error: 'No users found' });
+        let allUsers = await db.users.getAll();
+        let user = allUsers[0];
+
+        // First launch — auto-create a local admin so the app opens without setup.
+        if (!user) {
+            const passwordHash = await auth.hashPassword('admin');
+            user = await db.users.create({ username: 'admin', passwordHash, role: 'admin' });
+        }
+
         const token = auth.generateToken(user);
         res.json({ token });
     } catch (err) {
