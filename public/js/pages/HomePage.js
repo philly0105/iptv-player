@@ -170,19 +170,15 @@ class HomePage {
         this.isLoading = true;
 
         try {
-            // 0. Load Favorite Channels (first section)
-            await this.renderFavoriteChannels();
-
-            // 1. Load Watch History
-            const history = await window.API.request('GET', '/history?limit=12');
+            const [, history] = await Promise.all([
+                this.renderFavoriteChannels(),
+                window.API.request('GET', '/history?limit=12'),
+                this.renderRecentMovies(),
+                this.renderRecentSeries(),
+            ]);
             if (history && Array.isArray(history)) {
                 this.renderHistory(history);
             }
-
-            // 2. Load Recent Items
-            this.renderRecentMovies();
-            this.renderRecentSeries();
-
         } catch (err) {
             console.error('[Dashboard] Error loading data:', err);
         } finally {
