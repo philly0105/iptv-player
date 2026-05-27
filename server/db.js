@@ -1,59 +1,10 @@
-const fs = require('fs/promises');
+'use strict';
+const { getDb } = require('./db/sqlite');
+const fs = require('fs');
 const path = require('path');
-const { existsSync, mkdirSync } = require('fs');
 
-// Ensure data directory exists (sync is fine for startup)
-const dataDir = path.join(__dirname, '..', 'data');
-if (!existsSync(dataDir)) {
-  mkdirSync(dataDir, { recursive: true });
-}
+const dbJsonPath = path.join(__dirname, '..', 'data', 'db.json');
 
-const dbPath = path.join(dataDir, 'db.json');
-
-// Initialize database structure
-async function loadDb() {
-  try {
-    // Check if file exists (using fs.access is better for async, but we can catch ENOENT)
-    try {
-      const fileContent = await fs.readFile(dbPath, 'utf-8');
-      const data = JSON.parse(fileContent);
-      return {
-        sources: data.sources || [],
-        hiddenItems: data.hiddenItems || [],
-        favorites: data.favorites || [],
-        settings: data.settings || getDefaultSettings(),
-        users: data.users || [],
-        nextId: data.nextId || 1
-      };
-    } catch (error) {
-      if (error.code === 'ENOENT') {
-        // File doesn't exist, return default
-        return {
-          sources: [],
-          hiddenItems: [],
-          favorites: [],
-          settings: getDefaultSettings(),
-          users: [],
-          nextId: 1
-        };
-      }
-      throw error;
-    }
-  } catch (err) {
-    console.error('Error loading database:', err);
-    // Return safe default on error to prevent crashing, but log it
-    return {
-      sources: [],
-      hiddenItems: [],
-      favorites: [],
-      settings: getDefaultSettings(),
-      users: [],
-      nextId: 1
-    };
-  }
-}
-
-// Default settings
 function getDefaultSettings() {
   return {
     arrowKeysChangeChannel: true,
@@ -63,31 +14,26 @@ function getDefaultSettings() {
     lastVolume: 80,
     autoPlayNextEpisode: false,
     forceProxy: false,
-    forceTranscode: false, // Force Audio Transcode
-    forceVideoTranscode: false, // Force Video Transcode
+    forceTranscode: false,
+    forceVideoTranscode: false,
     forceRemux: false,
     autoTranscode: true,
     streamFormat: 'm3u8',
     epgRefreshInterval: '24',
-    // User-Agent settings
-    userAgentPreset: 'chrome',    // chrome | vlc | tivimate | custom
-    userAgentCustom: '',          // Custom UA string when preset is 'custom'
-    // Transcoding settings
-    hwEncoder: 'auto',            // auto | nvenc | amf | qsv | vaapi | software
-    maxResolution: '1080p',       // 4k | 1080p | 720p | 480p
-    quality: 'medium',            // high | medium | low
-    audioMixPreset: 'auto',       // auto | itu | night | cinematic | passthrough
-    // Probe cache settings  
-    probeCacheTTL: 300,           // 5 minutes for URL probe cache
-    seriesProbeCacheDays: 7,       // 7 days for series episode probe cache
-    // Upscaling settings
+    userAgentPreset: 'chrome',
+    userAgentCustom: '',
+    hwEncoder: 'auto',
+    maxResolution: '1080p',
+    quality: 'medium',
+    audioMixPreset: 'auto',
+    probeCacheTTL: 300,
+    seriesProbeCacheDays: 7,
     upscaleEnabled: false,
-    upscaleMethod: 'hardware',    // hardware | software
-    upscaleTarget: '1080p'        // 1080p | 4k | 720p
+    upscaleMethod: 'hardware',
+    upscaleTarget: '1080p'
   };
 }
 
-// User-Agent presets
 const USER_AGENT_PRESETS = {
   chrome: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
   vlc: 'VLC/3.0.20 LibVLC/3.0.20',
@@ -101,368 +47,417 @@ function getUserAgent(settings) {
   return USER_AGENT_PRESETS[settings.userAgentPreset] || USER_AGENT_PRESETS.chrome;
 }
 
-// Write lock to prevent concurrent writes from corrupting db.json
-let writeQueue = Promise.resolve();
-const tmpPath = dbPath + '.tmp';
+// ── One-time migration from db.json → SQLite ─────────────────────────────────
 
-async function saveDb(data) {
-  // Queue this write operation - each write waits for the previous one
-  writeQueue = writeQueue.then(async () => {
-    try {
-      const jsonString = JSON.stringify(data, null, 2);
-      // Atomic write: write to temp file, then rename
-      // Rename is atomic on most filesystems, preventing corruption on crash
-      await fs.writeFile(tmpPath, jsonString);
-      await fs.rename(tmpPath, dbPath);
-    } catch (err) {
-      console.error('Error writing database:', err);
-      // Clean up temp file if it exists
-      try { await fs.unlink(tmpPath); } catch { /* ignore */ }
-      throw err;
-    }
-  }).catch(err => {
-    console.error('Database write failed:', err);
-  });
+function runMigration() {
+  if (!fs.existsSync(dbJsonPath)) return;
 
-  return writeQueue;
+  const db = getDb();
+
+  if (db.prepare("SELECT 1 FROM app_settings WHERE key = 'migration_v1_done'").get()) {
+    // Migration already done; clean up stale file if it somehow reappeared
+    try { fs.renameSync(dbJsonPath, dbJsonPath + '.migrated'); } catch {}
+    return;
+  }
+
+  try {
+    const data = JSON.parse(fs.readFileSync(dbJsonPath, 'utf8'));
+
+    db.transaction(() => {
+      const insSource = db.prepare(`
+        INSERT OR IGNORE INTO sources (id, name, type, url, username, password, enabled, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const s of (data.sources || [])) {
+        insSource.run(s.id, s.name, s.type, s.url, s.username ?? null, s.password ?? null,
+          s.enabled ? 1 : 0, s.created_at, s.updated_at);
+      }
+
+      const insUser = db.prepare(`
+        INSERT OR IGNORE INTO users (id, username, password_hash, role, oidc_id, email, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const u of (data.users || [])) {
+        insUser.run(u.id, u.username, u.passwordHash ?? null, u.role ?? 'viewer',
+          u.oidcId ?? null, u.email ?? null, u.createdAt);
+      }
+
+      if (data.settings && !db.prepare("SELECT 1 FROM app_settings WHERE key = 'settings'").get()) {
+        db.prepare("INSERT INTO app_settings (key, value) VALUES ('settings', ?)").run(
+          JSON.stringify({ ...getDefaultSettings(), ...data.settings })
+        );
+      }
+
+      const insHidden = db.prepare(
+        'INSERT OR IGNORE INTO hidden_items (source_id, item_type, item_id) VALUES (?, ?, ?)'
+      );
+      for (const h of (data.hiddenItems || [])) {
+        insHidden.run(h.source_id, h.item_type, h.item_id);
+      }
+
+      const insFav = db.prepare(
+        'INSERT OR IGNORE INTO legacy_favorites (source_id, item_id, item_type, created_at) VALUES (?, ?, ?, ?)'
+      );
+      for (const f of (data.favorites || [])) {
+        insFav.run(f.source_id, f.item_id, f.item_type, f.created_at || new Date().toISOString());
+      }
+
+      db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('migration_v1_done', 'true')").run();
+    })();
+
+    fs.renameSync(dbJsonPath, dbJsonPath + '.migrated');
+    console.log('[DB] Migration from db.json to SQLite completed');
+  } catch (err) {
+    console.error('[DB] Migration failed:', err);
+  }
 }
 
-// Source CRUD operations
+runMigration();
+
+// ── Row mappers ───────────────────────────────────────────────────────────────
+
+function rowToSource(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    url: row.url,
+    username: row.username,
+    password: row.password,
+    enabled: row.enabled === 1,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function rowToUser(row, includeHash = false) {
+  const u = {
+    id: row.id,
+    username: row.username,
+    role: row.role,
+    oidcId: row.oidc_id,
+    email: row.email,
+    createdAt: row.created_at,
+  };
+  if (includeHash) u.passwordHash = row.password_hash;
+  return u;
+}
+
+// ── Sources ───────────────────────────────────────────────────────────────────
+
 const sources = {
   async getAll() {
-    const db = await loadDb();
-    return db.sources;
+    return getDb().prepare('SELECT * FROM sources ORDER BY id').all().map(rowToSource);
   },
 
   async getById(id) {
-    const db = await loadDb();
-    return db.sources.find(s => s.id === parseInt(id));
+    const row = getDb().prepare('SELECT * FROM sources WHERE id = ?').get(parseInt(id));
+    return row ? rowToSource(row) : null;
   },
 
   async getByType(type) {
-    const db = await loadDb();
-    return db.sources.filter(s => s.type === type && s.enabled);
+    return getDb().prepare('SELECT * FROM sources WHERE type = ? AND enabled = 1').all(type).map(rowToSource);
   },
 
   async create(source) {
-    const db = await loadDb();
-    const newSource = {
-      id: db.nextId++,
-      ...source,
-      enabled: true,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    db.sources.push(newSource);
-    await saveDb(db);
-    return newSource;
+    const db = getDb();
+    const now = new Date().toISOString();
+    const result = db.prepare(`
+      INSERT INTO sources (name, type, url, username, password, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(source.name, source.type, source.url, source.username ?? null, source.password ?? null, now, now);
+    return rowToSource(db.prepare('SELECT * FROM sources WHERE id = ?').get(result.lastInsertRowid));
   },
 
   async update(id, updates) {
-    const db = await loadDb();
-    const index = db.sources.findIndex(s => s.id === parseInt(id));
-    if (index === -1) return null;
-
-    db.sources[index] = {
-      ...db.sources[index],
-      ...updates,
-      updated_at: new Date().toISOString()
-    };
-    await saveDb(db);
-    return db.sources[index];
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM sources WHERE id = ?').get(parseInt(id));
+    if (!existing) return null;
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE sources SET name = ?, url = ?, username = ?, password = ?, updated_at = ? WHERE id = ?
+    `).run(
+      updates.name !== undefined ? updates.name : existing.name,
+      updates.url !== undefined ? updates.url : existing.url,
+      updates.username !== undefined ? updates.username : existing.username,
+      updates.password !== undefined ? updates.password : existing.password,
+      now, parseInt(id)
+    );
+    return rowToSource(db.prepare('SELECT * FROM sources WHERE id = ?').get(parseInt(id)));
   },
 
   async delete(id) {
-    const db = await loadDb();
-    db.sources = db.sources.filter(s => s.id !== parseInt(id));
-    // Also delete related hidden items and favorites
-    db.hiddenItems = db.hiddenItems.filter(h => h.source_id !== parseInt(id));
-    db.favorites = db.favorites.filter(f => f.source_id !== parseInt(id));
-    await saveDb(db);
+    const db = getDb();
+    const numId = parseInt(id);
+    db.transaction(() => {
+      db.prepare('DELETE FROM hidden_items WHERE source_id = ?').run(numId);
+      db.prepare('DELETE FROM legacy_favorites WHERE source_id = ?').run(numId);
+      db.prepare('DELETE FROM sources WHERE id = ?').run(numId);
+    })();
   },
 
   async toggleEnabled(id) {
-    const db = await loadDb();
-    const source = db.sources.find(s => s.id === parseInt(id));
-    if (source) {
-      source.enabled = !source.enabled;
-      source.updated_at = new Date().toISOString();
-      await saveDb(db);
-    }
-    return source;
-  }
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM sources WHERE id = ?').get(parseInt(id));
+    if (!existing) return null;
+    db.prepare('UPDATE sources SET enabled = ?, updated_at = ? WHERE id = ?')
+      .run(existing.enabled ? 0 : 1, new Date().toISOString(), parseInt(id));
+    return rowToSource(db.prepare('SELECT * FROM sources WHERE id = ?').get(parseInt(id)));
+  },
 };
 
-// Hidden items operations
+// ── Hidden Items ──────────────────────────────────────────────────────────────
+
 const hiddenItems = {
   async getAll(sourceId = null) {
-    const db = await loadDb();
     if (sourceId) {
-      return db.hiddenItems.filter(h => h.source_id === parseInt(sourceId));
+      return getDb().prepare('SELECT * FROM hidden_items WHERE source_id = ?').all(parseInt(sourceId));
     }
-    return db.hiddenItems;
+    return getDb().prepare('SELECT * FROM hidden_items').all();
   },
 
   async hide(sourceId, itemType, itemId) {
-    const db = await loadDb();
-    // Check if already hidden
-    const exists = db.hiddenItems.find(
-      h => h.source_id === parseInt(sourceId) && h.item_type === itemType && h.item_id === itemId
-    );
-    if (!exists) {
-      db.hiddenItems.push({
-        id: db.nextId++,
-        source_id: parseInt(sourceId),
-        item_type: itemType,
-        item_id: itemId
-      });
-      await saveDb(db);
-    }
+    getDb().prepare('INSERT OR IGNORE INTO hidden_items (source_id, item_type, item_id) VALUES (?, ?, ?)')
+      .run(parseInt(sourceId), itemType, itemId);
   },
 
   async show(sourceId, itemType, itemId) {
-    const db = await loadDb();
-    db.hiddenItems = db.hiddenItems.filter(
-      h => !(h.source_id === parseInt(sourceId) && h.item_type === itemType && h.item_id === itemId)
-    );
-    await saveDb(db);
+    getDb().prepare('DELETE FROM hidden_items WHERE source_id = ? AND item_type = ? AND item_id = ?')
+      .run(parseInt(sourceId), itemType, itemId);
   },
 
   async isHidden(sourceId, itemType, itemId) {
-    const db = await loadDb();
-    return db.hiddenItems.some(
-      h => h.source_id === parseInt(sourceId) && h.item_type === itemType && h.item_id === itemId
-    );
+    return !!getDb().prepare(
+      'SELECT 1 FROM hidden_items WHERE source_id = ? AND item_type = ? AND item_id = ?'
+    ).get(parseInt(sourceId), itemType, itemId);
   },
 
   async bulkHide(items) {
-    const db = await loadDb();
-    let modified = false;
-
-    items.forEach(item => {
-      const { sourceId, itemType, itemId } = item;
-      const exists = db.hiddenItems.find(
-        h => h.source_id === parseInt(sourceId) && h.item_type === itemType && h.item_id === itemId
-      );
-
-      if (!exists) {
-        db.hiddenItems.push({
-          id: db.nextId++,
-          source_id: parseInt(sourceId),
-          item_type: itemType,
-          item_id: itemId
-        });
-        modified = true;
-      }
-    });
-
-    if (modified) {
-      await saveDb(db);
-    }
+    const db = getDb();
+    const ins = db.prepare('INSERT OR IGNORE INTO hidden_items (source_id, item_type, item_id) VALUES (?, ?, ?)');
+    db.transaction(() => {
+      for (const { sourceId, itemType, itemId } of items) ins.run(parseInt(sourceId), itemType, itemId);
+    })();
     return true;
   },
 
   async bulkShow(items) {
-    const db = await loadDb();
-    const initialLength = db.hiddenItems.length;
-
-    // Create a set of "signatures" for O(1) lookup of items to remove
-    const toRemove = new Set(items.map(i => `${i.sourceId}:${i.itemType}:${i.itemId}`));
-
-    db.hiddenItems = db.hiddenItems.filter(h =>
-      !toRemove.has(`${h.source_id}:${h.item_type}:${h.item_id}`)
-    );
-
-    if (db.hiddenItems.length !== initialLength) {
-      await saveDb(db);
-    }
+    const db = getDb();
+    const del = db.prepare('DELETE FROM hidden_items WHERE source_id = ? AND item_type = ? AND item_id = ?');
+    db.transaction(() => {
+      for (const { sourceId, itemType, itemId } of items) del.run(parseInt(sourceId), itemType, itemId);
+    })();
     return true;
-  }
+  },
 };
 
-// Favorites operations
+// ── Legacy Favorites (no user_id; per-user favorites are in sqlite.favorites) ─
+
 const favorites = {
   async getAll(sourceId = null, itemType = null) {
-    const db = await loadDb();
-    let results = db.favorites;
-    if (sourceId) {
-      results = results.filter(f => f.source_id === parseInt(sourceId));
-    }
-    if (itemType) {
-      results = results.filter(f => f.item_type === itemType);
-    }
-    return results;
+    const db = getDb();
+    let sql = 'SELECT * FROM legacy_favorites WHERE 1=1';
+    const params = [];
+    if (sourceId) { sql += ' AND source_id = ?'; params.push(parseInt(sourceId)); }
+    if (itemType) { sql += ' AND item_type = ?'; params.push(itemType); }
+    return db.prepare(sql).all(...params);
   },
 
   async add(sourceId, itemId, itemType = 'channel') {
-    const db = await loadDb();
-    // Check if already favorited
-    const exists = db.favorites.find(
-      f => f.source_id === parseInt(sourceId) && f.item_id === String(itemId) && f.item_type === itemType
-    );
-    if (!exists) {
-      db.favorites.push({
-        id: db.nextId++,
-        source_id: parseInt(sourceId),
-        item_id: String(itemId),
-        item_type: itemType, // 'channel', 'movie', 'series'
-        created_at: new Date().toISOString()
-      });
-      await saveDb(db);
-    }
+    getDb().prepare(
+      'INSERT OR IGNORE INTO legacy_favorites (source_id, item_id, item_type, created_at) VALUES (?, ?, ?, ?)'
+    ).run(parseInt(sourceId), String(itemId), itemType, new Date().toISOString());
     return true;
   },
 
   async remove(sourceId, itemId, itemType = 'channel') {
-    const db = await loadDb();
-    db.favorites = db.favorites.filter(
-      f => !(f.source_id === parseInt(sourceId) && f.item_id === String(itemId) && f.item_type === itemType)
-    );
-    await saveDb(db);
+    getDb().prepare(
+      'DELETE FROM legacy_favorites WHERE source_id = ? AND item_id = ? AND item_type = ?'
+    ).run(parseInt(sourceId), String(itemId), itemType);
     return true;
   },
 
   async isFavorite(sourceId, itemId, itemType = 'channel') {
-    const db = await loadDb();
-    return db.favorites.some(
-      f => f.source_id === parseInt(sourceId) && f.item_id === String(itemId) && f.item_type === itemType
-    );
-  }
+    return !!getDb().prepare(
+      'SELECT 1 FROM legacy_favorites WHERE source_id = ? AND item_id = ? AND item_type = ?'
+    ).get(parseInt(sourceId), String(itemId), itemType);
+  },
 };
 
-// Settings operations
+// ── Settings ──────────────────────────────────────────────────────────────────
+
 const settings = {
   async get() {
-    const db = await loadDb();
-    return { ...getDefaultSettings(), ...db.settings };
+    const row = getDb().prepare("SELECT value FROM app_settings WHERE key = 'settings'").get();
+    if (!row) return getDefaultSettings();
+    return { ...getDefaultSettings(), ...JSON.parse(row.value) };
   },
 
   async update(newSettings) {
-    const db = await loadDb();
-    db.settings = { ...db.settings, ...newSettings };
-    await saveDb(db);
-    return db.settings;
+    const db = getDb();
+    const current = await settings.get();
+    const merged = { ...current, ...newSettings };
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('settings', ?)").run(JSON.stringify(merged));
+    return merged;
   },
 
   async reset() {
-    const db = await loadDb();
-    db.settings = getDefaultSettings();
-    await saveDb(db);
-    return db.settings;
-  }
+    const defaults = getDefaultSettings();
+    getDb().prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('settings', ?)").run(JSON.stringify(defaults));
+    return defaults;
+  },
 };
 
-// User operations
+// ── Users ─────────────────────────────────────────────────────────────────────
+
 const users = {
   async getAll() {
-    const db = await loadDb();
-    return db.users || [];
+    return getDb().prepare('SELECT * FROM users ORDER BY id').all().map(r => rowToUser(r, true));
   },
 
   async getById(id) {
-    const db = await loadDb();
-    return db.users?.find(u => u.id === parseInt(id));
+    const row = getDb().prepare('SELECT * FROM users WHERE id = ?').get(parseInt(id));
+    return row ? rowToUser(row, true) : null;
   },
 
   async getByUsername(username) {
-    const db = await loadDb();
-    return db.users?.find(u => u.username === username);
+    const row = getDb().prepare('SELECT * FROM users WHERE username = ?').get(username);
+    return row ? rowToUser(row, true) : null;
   },
 
   async getByOidcId(oidcId) {
-    const db = await loadDb();
-    return db.users?.find(u => u.oidcId === oidcId);
+    const row = getDb().prepare('SELECT * FROM users WHERE oidc_id = ?').get(oidcId);
+    return row ? rowToUser(row, true) : null;
   },
 
   async getByEmail(email) {
-    const db = await loadDb();
-    return db.users?.find(u => u.email === email);
+    const row = getDb().prepare('SELECT * FROM users WHERE email = ?').get(email);
+    return row ? rowToUser(row, true) : null;
   },
 
   async create(userData) {
-    const db = await loadDb();
-    if (!db.users) {
-      db.users = [];
+    const db = getDb();
+    let result;
+    try {
+      result = db.prepare(`
+        INSERT INTO users (username, password_hash, role, oidc_id, email, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        userData.username,
+        userData.passwordHash ?? null,
+        userData.role || 'viewer',
+        userData.oidcId ?? null,
+        userData.email ?? null,
+        new Date().toISOString()
+      );
+    } catch (err) {
+      if (err.message && err.message.includes('UNIQUE')) throw new Error('Username already exists');
+      throw err;
     }
-
-    // Check if username already exists
-    if (db.users.some(u => u.username === userData.username)) {
-      throw new Error('Username already exists');
-    }
-
-    const newUser = {
-      id: db.nextId++,
-      username: userData.username,
-      // For OIDC users, passwordHash is optional
-      passwordHash: userData.passwordHash || null,
-      role: userData.role || 'viewer',
-      oidcId: userData.oidcId || null,
-      email: userData.email || null,
-      createdAt: new Date().toISOString()
-    };
-
-    db.users.push(newUser);
-    await saveDb(db);
-
-    // Return user without password hash
-    const { passwordHash, ...userWithoutPassword } = newUser;
-    return userWithoutPassword;
+    const row = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
+    return rowToUser(row, false);
   },
 
   async update(id, updates) {
-    const db = await loadDb();
-    const userIndex = db.users?.findIndex(u => u.id === parseInt(id));
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(parseInt(id));
+    if (!existing) throw new Error('User not found');
 
-    if (userIndex === -1 || userIndex === undefined) {
-      throw new Error('User not found');
-    }
-
-    // Check if username is being changed and if it already exists
-    if (updates.username && updates.username !== db.users[userIndex].username) {
-      if (db.users.some(u => u.username === updates.username)) {
+    if (updates.username && updates.username !== existing.username) {
+      if (db.prepare('SELECT 1 FROM users WHERE username = ? AND id != ?').get(updates.username, parseInt(id))) {
         throw new Error('Username already exists');
       }
     }
 
-    db.users[userIndex] = {
-      ...db.users[userIndex],
-      ...updates,
-      updatedAt: new Date().toISOString()
-    };
+    if (updates.role && updates.role !== 'admin' && existing.role === 'admin') {
+      const adminCount = db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'admin'").get().c;
+      if (adminCount <= 1) throw new Error('Cannot remove admin role from the last admin user');
+    }
 
-    await saveDb(db);
+    db.prepare(`
+      UPDATE users SET username = ?, password_hash = ?, role = ?, oidc_id = ?, email = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      updates.username ?? existing.username,
+      updates.passwordHash !== undefined ? updates.passwordHash : existing.password_hash,
+      updates.role ?? existing.role,
+      updates.oidcId !== undefined ? updates.oidcId : existing.oidc_id,
+      updates.email !== undefined ? updates.email : existing.email,
+      new Date().toISOString(),
+      parseInt(id)
+    );
 
-    // Return user without password hash
-    const { passwordHash, ...userWithoutPassword } = db.users[userIndex];
-    return userWithoutPassword;
+    return rowToUser(db.prepare('SELECT * FROM users WHERE id = ?').get(parseInt(id)), false);
   },
 
   async delete(id) {
-    const db = await loadDb();
-    const userIndex = db.users?.findIndex(u => u.id === parseInt(id));
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(parseInt(id));
+    if (!existing) throw new Error('User not found');
 
-    if (userIndex === -1 || userIndex === undefined) {
-      throw new Error('User not found');
+    if (existing.role === 'admin') {
+      const adminCount = db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'admin'").get().c;
+      if (adminCount <= 1) throw new Error('Cannot delete the last admin user');
     }
 
-    // Prevent deleting the last admin
-    const user = db.users[userIndex];
-    if (user.role === 'admin') {
-      const adminCount = db.users.filter(u => u.role === 'admin').length;
-      if (adminCount <= 1) {
-        throw new Error('Cannot delete the last admin user');
-      }
-    }
-
-    db.users.splice(userIndex, 1);
-    await saveDb(db);
+    db.prepare('DELETE FROM users WHERE id = ?').run(parseInt(id));
     return true;
   },
 
   async count() {
-    const db = await loadDb();
-    return db.users?.length || 0;
-  }
+    return getDb().prepare('SELECT COUNT(*) as c FROM users').get().c;
+  },
 };
 
-module.exports = { loadDb, saveDb, sources, hiddenItems, favorites, settings, users, getDefaultSettings, getUserAgent, USER_AGENT_PRESETS };
+// ── loadDb / saveDb — compat shims for any remaining callers ─────────────────
+// Routes should use the typed APIs above. These shims provide a best-effort
+// reconstruction so nothing crashes if called.
+
+async function loadDb() {
+  const db = getDb();
+  const settingsRow = db.prepare("SELECT value FROM app_settings WHERE key = 'settings'").get();
+  return {
+    sources: db.prepare('SELECT * FROM sources ORDER BY id').all().map(rowToSource),
+    users: db.prepare('SELECT * FROM users ORDER BY id').all().map(r => rowToUser(r, true)),
+    hiddenItems: db.prepare('SELECT * FROM hidden_items').all(),
+    favorites: db.prepare('SELECT * FROM legacy_favorites').all(),
+    settings: settingsRow ? JSON.parse(settingsRow.value) : getDefaultSettings(),
+    nextId: (db.prepare('SELECT MAX(id) as m FROM sources').get().m || 0) + 1,
+    nextUserId: (db.prepare('SELECT MAX(id) as m FROM users').get().m || 0) + 1,
+  };
+}
+
+async function saveDb(data) {
+  if (!data || !data.users) return;
+  const db = getDb();
+  const existing = new Map(
+    db.prepare('SELECT * FROM users ORDER BY id').all().map(r => [r.id, r])
+  );
+
+  db.transaction(() => {
+    const seen = new Set();
+    for (const u of data.users) {
+      seen.add(u.id);
+      if (existing.has(u.id)) {
+        db.prepare(
+          'UPDATE users SET username = ?, password_hash = ?, role = ?, updated_at = ? WHERE id = ?'
+        ).run(u.username, u.passwordHash ?? null, u.role, new Date().toISOString(), u.id);
+      } else {
+        db.prepare(`
+          INSERT INTO users (id, username, password_hash, role, oidc_id, email, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(u.id, u.username, u.passwordHash ?? null, u.role || 'viewer',
+          u.oidcId ?? null, u.email ?? null, u.createdAt || new Date().toISOString());
+      }
+    }
+    for (const id of existing.keys()) {
+      if (!seen.has(id)) db.prepare('DELETE FROM users WHERE id = ?').run(id);
+    }
+  })();
+}
+
+module.exports = {
+  loadDb, saveDb,
+  sources, hiddenItems, favorites, settings, users,
+  getDefaultSettings, getUserAgent, USER_AGENT_PRESETS,
+};

@@ -160,6 +160,70 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_recordings_started ON recordings(started_at DESC);
     `);
 
+    // Sources (migrated from db.json)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            url TEXT NOT NULL,
+            username TEXT,
+            password TEXT,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    `);
+
+    // App settings key-value store (migrated from db.json)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+    `);
+
+    // Users (migrated from db.json)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT,
+            role TEXT NOT NULL DEFAULT 'viewer',
+            oidc_id TEXT,
+            email TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oidc_id ON users(oidc_id) WHERE oidc_id IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL;
+    `);
+
+    // Hidden items (migrated from db.json hiddenItems array)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS hidden_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id INTEGER NOT NULL,
+            item_type TEXT NOT NULL,
+            item_id TEXT NOT NULL,
+            UNIQUE(source_id, item_type, item_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_hidden_items_source ON hidden_items(source_id);
+    `);
+
+    // Legacy favorites without user_id (migrated from db.json favorites array)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS legacy_favorites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id INTEGER NOT NULL,
+            item_id TEXT NOT NULL,
+            item_type TEXT NOT NULL DEFAULT 'channel',
+            created_at TEXT NOT NULL,
+            UNIQUE(source_id, item_id, item_type)
+        );
+        CREATE INDEX IF NOT EXISTS idx_legacy_favorites_source ON legacy_favorites(source_id);
+    `);
+
     console.log('[SQLite] Schema initialized');
 }
 
