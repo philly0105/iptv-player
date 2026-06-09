@@ -27,7 +27,7 @@ const CACHE_DIR = path.join(process.cwd(), 'transcode-cache');
 
 // Session settings
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes idle timeout
-const SEGMENT_DURATION = 4; // seconds per HLS segment
+const SEGMENT_DURATION = 2; // seconds per HLS segment (lower = faster time-to-first-frame)
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
 
 /**
@@ -193,9 +193,12 @@ class TranscodeSession extends EventEmitter {
         }
 
         // Input options (common)
+        // Stream codecs are already known from the prior /api/probe call, so ffmpeg
+        // does not need a deep re-analysis here — keep these small to avoid a second
+        // slow provider open before the first segment is produced.
         args.push(
-            '-probesize', '5000000',
-            '-analyzeduration', '5000000',
+            '-probesize', '500000',
+            '-analyzeduration', '1000000',
             '-fflags', '+genpts+discardcorrupt',
             '-err_detect', 'ignore_err',
             '-reconnect', '1',
@@ -733,6 +736,27 @@ async function recoverSessions() {
 }
 
 /**
+ * Purge the entire transcode cache on startup.
+ *
+ * At boot, no sessions are running and session recovery is not wired up, so every
+ * directory left in CACHE_DIR is a stale leftover from a previous run that nothing
+ * would otherwise clean — the idle cleanup only tracks sessions created in the
+ * current process. Wiping the cache on startup is what keeps it from growing
+ * without bound across restarts (the cause of the 44 GB buildup).
+ */
+async function purgeCacheOnStartup() {
+    try {
+        await fs.rm(CACHE_DIR, { recursive: true, force: true });
+        console.log('[TranscodeSession] Purged stale transcode cache on startup');
+    } catch (err) {
+        if (err.code !== 'ENOENT') {
+            console.error('[TranscodeSession] Failed to purge cache on startup:', err.message);
+        }
+    }
+    await ensureCacheDir();
+}
+
+/**
  * Start cleanup interval
  */
 let cleanupInterval = null;
@@ -765,6 +789,7 @@ module.exports = {
     removeSession,
     cleanupStaleSessions,
     recoverSessions,
+    purgeCacheOnStartup,
     startCleanupInterval,
     getAllSessions,
     CACHE_DIR,

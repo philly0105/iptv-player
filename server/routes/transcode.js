@@ -20,8 +20,12 @@ const transcodeSession = require('../services/transcodeSession');
  *   GET /api/transcode/sessions        - List all sessions (debug)
  */
 
-// Start session cleanup interval
-transcodeSession.startCleanupInterval();
+// On startup, purge stale cache left over from previous runs, then start the
+// idle-session cleanup interval. The purge prevents the cache from growing
+// unbounded across restarts; the interval bounds it during a single run.
+transcodeSession.purgeCacheOnStartup()
+    .catch(err => console.error('[Transcode] Startup cache purge failed:', err))
+    .finally(() => transcodeSession.startCleanupInterval());
 
 /**
  * Create a new transcode session
