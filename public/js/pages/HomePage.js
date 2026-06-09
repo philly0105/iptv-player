@@ -31,25 +31,7 @@ class HomePage {
 
         pageHome.innerHTML = `
             <div class="dashboard-content" id="home-content">
-                <section class="dashboard-section" id="continue-watching-section">
-                    <div class="section-header">
-                        <h2>Continue Watching</h2>
-                    </div>
-                    <div class="scroll-wrapper">
-                        <button class="scroll-arrow scroll-left" aria-label="Scroll left">
-                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
-                        </button>
-                        <div class="horizontal-scroll" id="continue-watching-list">
-                            <div class="loading-state">
-                                <div class="loading"></div>
-                                <span>Loading history...</span>
-                            </div>
-                        </div>
-                        <button class="scroll-arrow scroll-right" aria-label="Scroll right">
-                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
-                        </button>
-                    </div>
-                </section>
+                <!-- Continue Watching section is created dynamically if watch history exists -->
 
                 <section class="dashboard-section" id="favorite-channels-section">
                     <div class="section-header">
@@ -120,36 +102,40 @@ class HomePage {
 
     initScrollArrows() {
         this.container.querySelectorAll('.scroll-wrapper').forEach(wrapper => {
-            const scrollContainer = wrapper.querySelector('.horizontal-scroll');
-            const leftBtn = wrapper.querySelector('.scroll-left');
-            const rightBtn = wrapper.querySelector('.scroll-right');
-
-            if (!scrollContainer || !leftBtn || !rightBtn) return;
-
-            const scrollAmount = 300; // pixels to scroll per click
-
-            leftBtn.addEventListener('click', () => {
-                scrollContainer.scrollBy({ left: -scrollAmount, behavior: 'smooth' });
-            });
-
-            rightBtn.addEventListener('click', () => {
-                scrollContainer.scrollBy({ left: scrollAmount, behavior: 'smooth' });
-            });
-
-            // Update arrow visibility based on scroll position
-            const updateArrows = () => {
-                const { scrollLeft, scrollWidth, clientWidth } = scrollContainer;
-                leftBtn.classList.toggle('hidden', scrollLeft <= 0);
-                rightBtn.classList.toggle('hidden', scrollLeft + clientWidth >= scrollWidth - 5);
-            };
-
-            // Store reference for later updates
-            wrapper._updateArrows = updateArrows;
-
-            scrollContainer.addEventListener('scroll', updateArrows);
-            // Initial check after content loads
-            setTimeout(updateArrows, 100);
+            this.initScrollArrowsForWrapper(wrapper);
         });
+    }
+
+    initScrollArrowsForWrapper(wrapper) {
+        const scrollContainer = wrapper.querySelector('.horizontal-scroll');
+        const leftBtn = wrapper.querySelector('.scroll-left');
+        const rightBtn = wrapper.querySelector('.scroll-right');
+
+        if (!scrollContainer || !leftBtn || !rightBtn) return;
+
+        const scrollAmount = 300; // pixels to scroll per click
+
+        leftBtn.addEventListener('click', () => {
+            scrollContainer.scrollBy({ left: -scrollAmount, behavior: 'smooth' });
+        });
+
+        rightBtn.addEventListener('click', () => {
+            scrollContainer.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+        });
+
+        // Update arrow visibility based on scroll position
+        const updateArrows = () => {
+            const { scrollLeft, scrollWidth, clientWidth } = scrollContainer;
+            leftBtn.classList.toggle('hidden', scrollLeft <= 0);
+            rightBtn.classList.toggle('hidden', scrollLeft + clientWidth >= scrollWidth - 5);
+        };
+
+        // Store reference for later updates
+        wrapper._updateArrows = updateArrows;
+
+        scrollContainer.addEventListener('scroll', updateArrows);
+        // Initial check after content loads
+        setTimeout(updateArrows, 100);
     }
 
     /**
@@ -302,17 +288,49 @@ class HomePage {
     }
 
     renderHistory(items) {
-        const list = document.getElementById('continue-watching-list');
-        const section = document.getElementById('continue-watching-section');
-
-        if (!list || !section) return;
+        let section = document.getElementById('continue-watching-section');
 
         if (items.length === 0) {
-            section.classList.add('hidden');
+            if (section) {
+                section.remove();
+            }
             return;
         }
 
-        section.classList.remove('hidden');
+        if (!section) {
+            const homeContent = document.getElementById('home-content');
+            if (!homeContent) return;
+
+            // Create and prepend the continue watching section at the top of home-content
+            section = document.createElement('section');
+            section.className = 'dashboard-section';
+            section.id = 'continue-watching-section';
+            section.innerHTML = `
+                <div class="section-header">
+                    <h2>Continue Watching</h2>
+                </div>
+                <div class="scroll-wrapper">
+                    <button class="scroll-arrow scroll-left" aria-label="Scroll left">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+                    </button>
+                    <div class="horizontal-scroll" id="continue-watching-list"></div>
+                    <button class="scroll-arrow scroll-right" aria-label="Scroll right">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                    </button>
+                </div>
+            `;
+            homeContent.prepend(section);
+
+            // Initialize scroll arrows specifically for this new section
+            const wrapper = section.querySelector('.scroll-wrapper');
+            if (wrapper) {
+                this.initScrollArrowsForWrapper(wrapper);
+            }
+        }
+
+        const list = document.getElementById('continue-watching-list');
+        if (!list) return;
+
         list.innerHTML = items.map(item => this.createCard(item)).join('');
 
         // Attach click listeners
@@ -321,18 +339,12 @@ class HomePage {
                 const id = card.dataset.id;
                 const item = items.find(i => i.item_id === id);
                 if (item) {
-                    const type = item.item_type || item.type;
-
-                    // IF it's a series, checking details is better than blind resume
-                    // BUT for "Continue Watching", we ideally want to resume
-
-                    // Prioritize playing directly for resume tiles
                     this.playItem(item, true); // true for resume
                 }
             });
         });
 
-        // Update scroll arrows after content renders
+        // Update scroll arrows
         this.updateScrollArrows();
     }
 

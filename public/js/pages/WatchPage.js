@@ -658,7 +658,7 @@ class WatchPage {
     stop() {
         // Stop history tracking and save final progress
         this.stopHistoryTracking();
-        this.saveProgress();
+        this.saveProgress(true);
 
         // Cleanup transcode session if exists
         this.stopTranscodeSession();
@@ -884,6 +884,9 @@ class WatchPage {
         // Keep overlay visible when paused
         this.showOverlay();
         clearTimeout(this.overlayTimeout);
+
+        // Force progress save immediately on pause
+        this.saveProgress(true);
     }
 
     onEnded() {
@@ -1597,8 +1600,9 @@ class WatchPage {
         }
     }
 
-    async saveProgress() {
-        if (!this.content || !this.video || this.video.paused) return;
+    async saveProgress(force = false) {
+        if (!this.content || !this.video) return;
+        if (!force && this.video.paused) return;
 
         const progress = Math.floor(this.video.currentTime);
         const duration = Math.floor(this.video.duration);
