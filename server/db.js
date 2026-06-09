@@ -409,6 +409,24 @@ const users = {
   },
 };
 
+// ── Probe Cache (persisted stream codec/compatibility results) ───────────────
+
+const probeCache = {
+  // Returns the cached result if present and newer than ttlMs, else null.
+  get(cacheKey, ttlMs) {
+    const row = getDb().prepare('SELECT result, created_at FROM probe_cache WHERE cache_key = ?').get(cacheKey);
+    if (!row) return null;
+    if (ttlMs && Date.now() - row.created_at > ttlMs) return null;
+    try { return JSON.parse(row.result); } catch { return null; }
+  },
+
+  set(cacheKey, result) {
+    getDb().prepare(
+      'INSERT OR REPLACE INTO probe_cache (cache_key, result, created_at) VALUES (?, ?, ?)'
+    ).run(cacheKey, JSON.stringify(result), Date.now());
+  },
+};
+
 // ── loadDb / saveDb — compat shims for any remaining callers ─────────────────
 // Routes should use the typed APIs above. These shims provide a best-effort
 // reconstruction so nothing crashes if called.
@@ -458,6 +476,6 @@ async function saveDb(data) {
 
 module.exports = {
   loadDb, saveDb,
-  sources, hiddenItems, favorites, settings, users,
+  sources, hiddenItems, favorites, settings, users, probeCache,
   getDefaultSettings, getUserAgent, USER_AGENT_PRESETS,
 };

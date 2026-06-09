@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
+const db = require('../db');
 
 /**
  * Probe endpoint - detects stream codecs and container
@@ -19,7 +20,9 @@ const { spawn } = require('child_process');
 
 // Probe cache (URL → result)
 const probeCache = new Map();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes (in-memory L1)
+// Persistent L2 cache TTL — VOD codecs are static, so this can be long.
+const PERSISTENT_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // Browser-compatible codecs
 const BROWSER_VIDEO_CODECS = ['h264', 'avc', 'avc1'];
@@ -161,11 +164,23 @@ router.get('/', async (req, res) => {
         });
     }
 
-    // Check cache
+    // Check in-memory cache (L1)
     const cached = probeCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < CACHE_TTL)) {
-        console.log(`[Probe] Cache hit for: ${url.substring(0, 50)}...`);
+        console.log(`[Probe] Cache hit (memory) for: ${url.substring(0, 50)}...`);
         return res.json(cached.result);
+    }
+
+    // Check persistent cache (L2) — survives restarts and replays beyond L1 TTL
+    try {
+        const persisted = db.probeCache.get(cacheKey, PERSISTENT_CACHE_TTL);
+        if (persisted) {
+            console.log(`[Probe] Cache hit (persistent) for: ${url.substring(0, 50)}...`);
+            probeCache.set(cacheKey, { result: persisted, timestamp: Date.now() });
+            return res.json(persisted);
+        }
+    } catch (err) {
+        console.warn('[Probe] Persistent cache read failed:', err.message);
     }
 
     console.log(`[Probe] Probing: ${url.substring(0, 80)}... ${ua ? `(UA: ${ua})` : ''}`);
@@ -174,8 +189,13 @@ router.get('/', async (req, res) => {
         const probeResult = await probeStream(url, ffprobePath, ua);
         const analysis = analyzeProbeResult(probeResult, url);
 
-        // Cache result
+        // Cache result (L1 memory + L2 persistent)
         probeCache.set(cacheKey, { result: analysis, timestamp: Date.now() });
+        try {
+            db.probeCache.set(cacheKey, analysis);
+        } catch (err) {
+            console.warn('[Probe] Persistent cache write failed:', err.message);
+        }
 
         console.log(`[Probe] Result: video=${analysis.video}, audio=${analysis.audio}, ` +
             `container=${analysis.container}, compatible=${analysis.compatible}, ` +

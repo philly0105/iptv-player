@@ -224,6 +224,16 @@ function initSchema() {
         CREATE INDEX IF NOT EXISTS idx_legacy_favorites_source ON legacy_favorites(source_id);
     `);
 
+    // Probe cache — persists stream codec/compatibility results across restarts so
+    // replaying a title doesn't re-probe the provider from scratch.
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS probe_cache (
+            cache_key TEXT PRIMARY KEY,
+            result JSON NOT NULL,
+            created_at INTEGER NOT NULL
+        );
+    `);
+
     console.log('[SQLite] Schema initialized');
 }
 

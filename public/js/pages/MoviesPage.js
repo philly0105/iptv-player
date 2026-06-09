@@ -22,6 +22,11 @@ class MoviesPage {
         this.favoriteIds = new Set(); // Track favorite movie IDs
         this.showFavoritesOnly = false;
 
+        // Hover prefetch: warm the probe cache before the user clicks Play
+        this.prefetchedKeys = new Set();
+        this.prefetchTimer = null;
+        this._autoTranscode = undefined; // lazily loaded from settings
+
         this.init();
     }
 
@@ -341,6 +346,15 @@ class MoviesPage {
                     this.playMovie(movie);
                 }
             });
+            // Prefetch the probe when the cursor rests on a card, so playback
+            // starts faster on click. Debounced + deduped to avoid spamming the provider.
+            card.addEventListener('mouseenter', () => {
+                this.prefetchTimer = setTimeout(() => this.prefetchMovie(movie), 400);
+            });
+            card.addEventListener('mouseleave', () => {
+                clearTimeout(this.prefetchTimer);
+            });
+
             fragment.appendChild(card);
         });
 
@@ -357,6 +371,35 @@ class MoviesPage {
         // Hide loader if done
         if (end >= this.filteredMovies.length && loader) {
             loader.style.display = 'none';
+        }
+    }
+
+    // Warm the probe cache for a movie in the background (fire-and-forget).
+    // Only runs when Auto Transcode is on, since that's the only play path that probes.
+    async prefetchMovie(movie) {
+        const key = `${movie.sourceId}:${movie.stream_id}`;
+        if (this.prefetchedKeys.has(key)) return;
+
+        // Lazily load the autoTranscode setting once
+        if (this._autoTranscode === undefined) {
+            try {
+                const settings = await API.settings.get();
+                this._autoTranscode = !!settings.autoTranscode;
+            } catch {
+                this._autoTranscode = false;
+            }
+        }
+        if (!this._autoTranscode) return;
+
+        this.prefetchedKeys.add(key); // mark optimistically to dedupe concurrent hovers
+        try {
+            const container = movie.container_extension || 'mp4';
+            const result = await API.proxy.xtream.getStreamUrl(movie.sourceId, movie.stream_id, 'movie', container);
+            if (result?.url) {
+                await fetch(`/api/probe?url=${encodeURIComponent(result.url)}`);
+            }
+        } catch {
+            this.prefetchedKeys.delete(key); // allow a retry on a later hover
         }
     }
 
