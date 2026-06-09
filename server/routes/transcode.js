@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const db = require('../db');
 const transcodeSession = require('../services/transcodeSession');
+const { safeUrl, safeUrlBody } = require('../middleware/validate');
 
 /**
  * Transcode Routes
@@ -32,12 +33,8 @@ transcodeSession.purgeCacheOnStartup()
  * POST /api/transcode/session
  * Body: { url: string, seekOffset?: number }
  */
-router.post('/session', async (req, res) => {
+router.post('/session', safeUrlBody('url'), async (req, res) => {
     const { url, seekOffset, videoMode, videoCodec, audioCodec, audioChannels, maxResolution, quality } = req.body;
-
-    if (!url) {
-        return res.status(400).json({ error: 'URL is required' });
-    }
 
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
     const settings = await db.settings.get();
@@ -163,11 +160,8 @@ router.get('/sessions', (req, res) => {
  * Transcodes audio to AAC for browser compatibility while passing video through.
  * This fixes playback issues with Dolby/AC3/EAC3 audio that browsers can't decode.
  */
-router.get('/', async (req, res) => {
+router.get('/', safeUrl('url'), async (req, res) => {
     const { url } = req.query;
-    if (!url) {
-        return res.status(400).json({ error: 'URL parameter is required' });
-    }
 
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
 

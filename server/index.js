@@ -15,6 +15,17 @@ const PORT = process.env.PORT || 3000;
 // 'true' would trust every X-Forwarded-For entry which can be spoofed.
 app.set('trust proxy', 1);
 
+// Baseline security headers (lightweight, no external dependency).
+// CSP is intentionally omitted — the local auto-login flow returns an inline
+// <script>, which a strict script-src would block.
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-XSS-Protection', '0');
+    next();
+});
+
 // Body parsing — 1 MB cap prevents request-smuggling via oversized payloads.
 // The previous 50 MB limit was unnecessary for this API's use cases.
 app.use(express.json({ limit: '1mb' }));

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
 const db = require('../db');
+const { safeUrl } = require('../middleware/validate');
 
 /**
  * Remux stream (container conversion only)
@@ -13,11 +14,8 @@ const db = require('../db');
  * 
  * Note: This does NOT fix Dolby/AC3 audio issues - use /api/transcode for that.
  */
-router.get('/', async (req, res) => {
+router.get('/', safeUrl('url'), async (req, res) => {
     const { url } = req.query;
-    if (!url) {
-        return res.status(400).json({ error: 'URL parameter is required' });
-    }
 
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
 
@@ -33,7 +31,6 @@ router.get('/', async (req, res) => {
     const args = [
         '-hide_banner',
         '-loglevel', 'warning',
-        '-user_agent', userAgent,
         '-user_agent', userAgent,
         // Standard probe size to handle complex containers (MKV) correctly
         '-probesize', '5000000',

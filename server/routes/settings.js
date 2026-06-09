@@ -2,6 +2,10 @@ const express = require('express');
 const router = express.Router();
 const { settings, getDefaultSettings } = require('../db');
 const syncService = require('../services/syncService');
+const { requireAuth } = require('../auth');
+
+// Settings control transcoding/sync behaviour — auth required.
+router.use(requireAuth);
 
 /**
  * Get all settings

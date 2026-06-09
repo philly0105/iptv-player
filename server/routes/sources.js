@@ -7,6 +7,10 @@ const syncService = require('../services/syncService');
 const m3uParser = require('../services/m3uParser');
 const { syncLimiter } = require('../middleware/rateLimiter');
 const { validateBody } = require('../middleware/validate');
+const { requireAuth } = require('../auth');
+
+// Sources expose provider credentials and trigger upstream syncs — auth required.
+router.use(requireAuth);
 
 // Get all sources
 router.get('/', async (req, res) => {
@@ -55,7 +59,8 @@ router.get('/:id', async (req, res) => {
         if (!source) {
             return res.status(404).json({ error: 'Source not found' });
         }
-        res.json(source);
+        // Never expose the stored provider password to the client.
+        res.json({ ...source, password: source.password ? '••••••••' : null });
     } catch (err) {
         console.error('Error getting source:', err);
         res.status(500).json({ error: 'Failed to get source' });

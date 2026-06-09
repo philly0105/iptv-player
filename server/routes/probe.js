@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
 const db = require('../db');
+const { safeUrl } = require('../middleware/validate');
 
 /**
  * Probe endpoint - detects stream codecs and container
@@ -142,11 +143,8 @@ function analyzeProbeResult(probeResult, url) {
     };
 }
 
-router.get('/', async (req, res) => {
+router.get('/', safeUrl('url'), async (req, res) => {
     const { url, ua } = req.query;
-    if (!url) {
-        return res.status(400).json({ error: 'URL parameter is required' });
-    }
 
     const ffprobePath = req.app.locals.ffprobePath;
     const cacheKey = `${url}${ua ? `|${ua}` : ''}`;

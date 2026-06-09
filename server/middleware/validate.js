@@ -127,8 +127,21 @@ function validateBody(schema) {
 /**
  * Restrict a route to loopback-only connections.
  * Uses the raw socket address (not req.ip) to prevent X-Forwarded-For spoofing.
+ *
+ * Also refuses any request that carries proxy-forwarding headers. When the app
+ * runs behind a same-host reverse proxy (nginx/Caddy), the socket address is
+ * always 127.0.0.1, which would otherwise let every proxied visitor pass this
+ * check. The presence of X-Forwarded-For / X-Real-IP / Forwarded means the
+ * request was relayed and is NOT a genuine local connection.
  */
 function requireLocalhost(req, res, next) {
+    if (process.env.ENABLE_LOCAL_AUTOLOGIN === 'false') {
+        return res.status(403).json({ error: 'Forbidden - local auto-login disabled' });
+    }
+    const forwarded = req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.headers['forwarded'];
+    if (forwarded) {
+        return res.status(403).json({ error: 'Forbidden - local access only' });
+    }
     const addr = req.socket?.remoteAddress || '';
     const isLocal = addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
     if (!isLocal) {
@@ -137,26 +150,106 @@ function requireLocalhost(req, res, next) {
     next();
 }
 
+const dns = require('dns').promises;
+const net = require('net');
+
 /**
- * Validate a URL query parameter — returns 400 if absent or not http/https.
+ * Returns true if an IP literal falls inside a private, loopback, link-local,
+ * carrier-grade-NAT, or otherwise non-public range. Blocking these prevents the
+ * stream/image/transcode proxies from being abused for SSRF — reaching cloud
+ * metadata (169.254.169.254), internal services, or scanning the LAN.
+ */
+function isBlockedIp(ip) {
+    const type = net.isIP(ip);
+    if (type === 4) {
+        const o = ip.split('.').map(Number);
+        if (o[0] === 0) return true;                         // 0.0.0.0/8
+        if (o[0] === 10) return true;                        // 10/8 private
+        if (o[0] === 127) return true;                       // 127/8 loopback
+        if (o[0] === 169 && o[1] === 254) return true;       // 169.254/16 link-local (metadata)
+        if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true; // 172.16/12 private
+        if (o[0] === 192 && o[1] === 168) return true;       // 192.168/16 private
+        if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return true; // 100.64/10 CGNAT
+        if (o[0] >= 224) return true;                        // multicast + reserved
+        return false;
+    }
+    if (type === 6) {
+        const lower = ip.toLowerCase();
+        if (lower === '::1' || lower === '::') return true;  // loopback / unspecified
+        // IPv4-mapped (::ffff:a.b.c.d) — re-check the embedded v4 address
+        const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+        if (mapped) return isBlockedIp(mapped[1]);
+        if (lower.startsWith('fe80')) return true;           // link-local
+        const first = parseInt(lower.split(':')[0] || '0', 16);
+        if ((first & 0xfe00) === 0xfc00) return true;        // fc00::/7 unique-local
+        return false;
+    }
+    return true; // not a valid IP literal → block
+}
+
+/**
+ * Resolve a hostname and confirm none of its addresses are blocked. Also blocks
+ * obvious internal names. Done at validation time to defeat DNS rebinding where
+ * a public-looking hostname resolves to a private address.
+ */
+async function hostIsSafe(hostname) {
+    const h = hostname.toLowerCase();
+    if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.internal') || h.endsWith('.local')) {
+        return false;
+    }
+    if (net.isIP(h)) {
+        return !isBlockedIp(h);
+    }
+    try {
+        const addrs = await dns.lookup(h, { all: true });
+        if (!addrs.length) return false;
+        return addrs.every(a => !isBlockedIp(a.address));
+    } catch {
+        return false; // cannot resolve → cannot verify → block
+    }
+}
+
+async function validateOutboundUrl(raw) {
+    if (!raw) return { ok: false, error: 'is required' };
+    if (typeof raw !== 'string' || raw.length > 4096) return { ok: false, error: 'is invalid' };
+    let parsed;
+    try {
+        parsed = new URL(raw);
+    } catch {
+        return { ok: false, error: 'must be a valid URL' };
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+        return { ok: false, error: 'must be an http or https URL' };
+    }
+    if (!(await hostIsSafe(parsed.hostname))) {
+        return { ok: false, error: 'resolves to a disallowed address' };
+    }
+    return { ok: true };
+}
+
+/**
+ * Validate a URL query parameter — http/https only, and not pointing at a
+ * private/internal address. Async because it resolves DNS to block rebinding.
  * Usage: router.get('/stream', safeUrl('url'), handler)
  */
 function safeUrl(param) {
-    return (req, res, next) => {
-        const raw = req.query[param];
-        if (!raw) {
-            return res.status(400).json({ error: `Query parameter '${param}' is required` });
+    return async (req, res, next) => {
+        const result = await validateOutboundUrl(req.query[param]);
+        if (!result.ok) {
+            return res.status(400).json({ error: `Query parameter '${param}' ${result.error}` });
         }
-        if (typeof raw !== 'string' || raw.length > 4096) {
-            return res.status(400).json({ error: `Query parameter '${param}' is invalid` });
-        }
-        try {
-            const parsed = new URL(raw);
-            if (!['http:', 'https:'].includes(parsed.protocol)) {
-                return res.status(400).json({ error: `Query parameter '${param}' must be an http or https URL` });
-            }
-        } catch {
-            return res.status(400).json({ error: `Query parameter '${param}' must be a valid URL` });
+        next();
+    };
+}
+
+/**
+ * Same outbound-URL validation for a field in req.body (e.g. POST /transcode/session).
+ */
+function safeUrlBody(param) {
+    return async (req, res, next) => {
+        const result = await validateOutboundUrl(req.body?.[param]);
+        if (!result.ok) {
+            return res.status(400).json({ error: `Field '${param}' ${result.error}` });
         }
         next();
     };
@@ -176,4 +269,4 @@ function capInt(param, max, defaultVal) {
     };
 }
 
-module.exports = { validateBody, requireLocalhost, safeUrl, capInt };
+module.exports = { validateBody, requireLocalhost, safeUrl, safeUrlBody, capInt };

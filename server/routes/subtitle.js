@@ -1,18 +1,21 @@
 const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
+const { safeUrl } = require('../middleware/validate');
 
 /**
  * Subtitle extraction endpoint
  * GET /api/subtitle?url=...&index=...
- * 
+ *
  * Extracts a specific subtitle track and converts it to WebVTT on the fly.
  */
-router.get('/', (req, res) => {
+router.get('/', safeUrl('url'), (req, res) => {
     const { url, index } = req.query;
 
-    if (!url || index === undefined) {
-        return res.status(400).json({ error: 'URL and index parameters are required' });
+    // index selects the ffmpeg stream to map (-map 0:<index>); restrict to a
+    // plain non-negative integer so it can't inject extra mapping syntax.
+    if (!/^\d+$/.test(String(index ?? ''))) {
+        return res.status(400).json({ error: 'A numeric index parameter is required' });
     }
 
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
