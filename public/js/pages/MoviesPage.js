@@ -82,6 +82,17 @@ class MoviesPage {
             await this.loadCategories();
             await this.loadMovies();
         }
+
+        // Pre-fill search from deep-link (?q=Title)
+        const q = new URLSearchParams(window.location.search).get('q');
+        if (q && this.searchInput) {
+            this.searchInput.value = q;
+            this.filterAndRender();
+            // Clean up the URL so the param doesn't persist on navigation
+            const url = new URL(window.location.href);
+            url.searchParams.delete('q');
+            history.replaceState(history.state, '', url.pathname + url.hash);
+        }
     }
 
     hide() {
