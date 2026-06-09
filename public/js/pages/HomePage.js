@@ -31,26 +31,6 @@ class HomePage {
 
         pageHome.innerHTML = `
             <div class="dashboard-content" id="home-content">
-                <section class="dashboard-section" id="favorite-channels-section">
-                    <div class="section-header">
-                        <h2>Favorite Channels</h2>
-                    </div>
-                    <div class="scroll-wrapper">
-                        <button class="scroll-arrow scroll-left" aria-label="Scroll left">
-                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
-                        </button>
-                        <div class="horizontal-scroll channel-tiles" id="favorite-channels-list">
-                            <div class="loading-state">
-                                <div class="loading"></div>
-                                <span>Loading favorites...</span>
-                            </div>
-                        </div>
-                        <button class="scroll-arrow scroll-right" aria-label="Scroll right">
-                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
-                        </button>
-                    </div>
-                </section>
-
                 <section class="dashboard-section" id="continue-watching-section">
                     <div class="section-header">
                         <h2>Continue Watching</h2>
@@ -63,6 +43,26 @@ class HomePage {
                             <div class="loading-state">
                                 <div class="loading"></div>
                                 <span>Loading history...</span>
+                            </div>
+                        </div>
+                        <button class="scroll-arrow scroll-right" aria-label="Scroll right">
+                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                        </button>
+                    </div>
+                </section>
+
+                <section class="dashboard-section" id="favorite-channels-section">
+                    <div class="section-header">
+                        <h2>Favorite Channels</h2>
+                    </div>
+                    <div class="scroll-wrapper">
+                        <button class="scroll-arrow scroll-left" aria-label="Scroll left">
+                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+                        </button>
+                        <div class="horizontal-scroll channel-tiles" id="favorite-channels-list">
+                            <div class="loading-state">
+                                <div class="loading"></div>
+                                <span>Loading favorites...</span>
                             </div>
                         </div>
                         <button class="scroll-arrow scroll-right" aria-label="Scroll right">
@@ -170,17 +170,32 @@ class HomePage {
         this.isLoading = true;
 
         try {
-            const [, history] = await Promise.all([
-                this.renderFavoriteChannels(),
-                window.API.request('GET', '/history?limit=12'),
-                this.renderRecentMovies(),
-                this.renderRecentSeries(),
-            ]);
-            if (history && Array.isArray(history)) {
-                this.renderHistory(history);
+            // Render UI sections independently to prevent one failure from blocking others
+            this.renderFavoriteChannels().catch(err => {
+                console.error('[Dashboard] Error loading favorite channels:', err);
+            });
+
+            this.renderRecentMovies().catch(err => {
+                console.error('[Dashboard] Error loading recent movies:', err);
+            });
+
+            this.renderRecentSeries().catch(err => {
+                console.error('[Dashboard] Error loading recent series:', err);
+            });
+
+            try {
+                const history = await window.API.request('GET', '/history?limit=12');
+                if (history && Array.isArray(history)) {
+                    this.renderHistory(history);
+                } else {
+                    this.renderHistory([]);
+                }
+            } catch (err) {
+                console.error('[Dashboard] Error loading history:', err);
+                this.renderHistory([]);
             }
         } catch (err) {
-            console.error('[Dashboard] Error loading data:', err);
+            console.error('[Dashboard] Error loading dashboard data:', err);
         } finally {
             this.isLoading = false;
         }

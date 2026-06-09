@@ -447,6 +447,17 @@ class SeriesPage {
                 if (this.app.pages.watch) {
                     const episodeTitle = episodeEl.querySelector('.episode-title')?.textContent || `Episode ${episodeNum}`;
 
+                    // Fetch watch progress if any
+                    let resumeTime = 0;
+                    try {
+                        const historyItem = await API.request('GET', `/history?itemId=${episodeId}`);
+                        if (historyItem && historyItem.progress) {
+                            resumeTime = historyItem.progress;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to fetch resume progress:', e);
+                    }
+
                     this.app.pages.watch.play({
                         type: 'series',
                         id: episodeId,
@@ -461,7 +472,8 @@ class SeriesPage {
                         seriesInfo: this.currentSeriesInfo,
                         currentSeason: seasonNum,
                         currentEpisode: episodeNum,
-                        containerExtension: container
+                        containerExtension: container,
+                        resumeTime
                     }, result.url);
                 }
             }

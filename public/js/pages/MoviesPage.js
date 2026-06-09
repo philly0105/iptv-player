@@ -413,6 +413,17 @@ class MoviesPage {
             if (result && result.url) {
                 // Play in dedicated Watch page
                 if (this.app.pages.watch) {
+                    // Fetch watch progress if any
+                    let resumeTime = 0;
+                    try {
+                        const historyItem = await API.request('GET', `/history?itemId=${movie.stream_id}`);
+                        if (historyItem && historyItem.progress) {
+                            resumeTime = historyItem.progress;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to fetch resume progress:', e);
+                    }
+
                     this.app.pages.watch.play({
                         type: 'movie',
                         id: movie.stream_id,
@@ -423,7 +434,8 @@ class MoviesPage {
                         rating: movie.rating,
                         sourceId: movie.sourceId,
                         categoryId: movie.category_id,
-                        containerExtension: container
+                        containerExtension: container,
+                        resumeTime
                     }, result.url);
                 }
             }

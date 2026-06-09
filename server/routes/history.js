@@ -16,6 +16,21 @@ router.get('/', capInt('limit', 200, 20), (req, res) => {
         const db = getDb();
         const userId = req.user.id;
         const limit = req.query.limit;
+        const itemId = req.query.itemId;
+
+        if (itemId) {
+            const row = db.prepare(`
+                SELECT * FROM watch_history 
+                WHERE user_id = ? AND item_id = ?
+            `).get(userId, itemId);
+            if (row) {
+                return res.json({
+                    ...row,
+                    data: JSON.parse(row.data || '{}')
+                });
+            }
+            return res.json(null);
+        }
 
         const rows = db.prepare(`
             SELECT * FROM watch_history 
