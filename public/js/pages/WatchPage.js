@@ -1623,9 +1623,9 @@ class WatchPage {
             };
 
             await window.API.request('POST', '/history', {
-                id: this.content.id,
+                id: String(this.content.id),
                 type: this.content.type === 'movie' ? 'movie' : 'episode',
-                sourceId: this.content.sourceId,
+                sourceId: this.content.sourceId ? String(this.content.sourceId) : undefined,
                 progress,
                 duration,
                 data
