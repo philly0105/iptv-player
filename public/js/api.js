@@ -74,7 +74,9 @@ const API = {
         bulkShow: (items) => API.request('POST', '/channels/show/bulk', { items }),
         // Fast bulk operations - single SQL statement
         showAll: (sourceId, contentType) => API.request('POST', '/channels/show/all', { sourceId, contentType }),
-        hideAll: (sourceId, contentType) => API.request('POST', '/channels/hide/all', { sourceId, contentType })
+        hideAll: (sourceId, contentType) => API.request('POST', '/channels/hide/all', { sourceId, contentType }),
+        // Unified search across live, movies, and series
+        search: (q) => API.request('GET', `/channels/search?q=${encodeURIComponent(q)}`)
     },
 
     // Favorites

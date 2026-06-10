@@ -292,6 +292,76 @@ router.post('/hide/all', async (req, res) => {
     }
 });
 
+// Unified search across live channels, movies, and series for a source-agnostic
+// "find anything" box. Returns the same item shape as /recent so the frontend
+// can reuse its card renderers and playback handlers.
+router.get('/search', async (req, res) => {
+    try {
+        const q = (req.query.q || '').trim();
+        if (q.length < 2) {
+            return res.json([]);
+        }
+        const limit = Math.min(parseInt(req.query.limit) || 60, 120);
+        // Cap each content type separately so a noisy live-TV match set can't
+        // starve movies/series out of the results.
+        const perType = Math.max(10, Math.ceil(limit / 3));
+
+        // Escape LIKE wildcards in user input so '%' / '_' are matched literally.
+        const escaped = q.replace(/[\\%_]/g, '\\$&');
+        const pattern = `%${escaped}%`;
+        const prefix = `${escaped}%`;
+
+        const db = getDb();
+        // One typed subquery per content type, each ranked (prefix matches first)
+        // and limited, then merged and grouped live → movie → series.
+        const typed = (type, rank) => `
+            SELECT source_id, item_id, name, stream_icon, type, container_extension,
+                   category_id, year, rating, data,
+                   ${rank} AS _t, (name LIKE ? ESCAPE '\\') AS _pfx
+            FROM playlist_items p
+            WHERE p.type = '${type}'
+              AND p.is_hidden = 0
+              AND p.name LIKE ? ESCAPE '\\'
+              AND NOT EXISTS (
+                  SELECT 1 FROM categories c
+                  WHERE c.source_id = p.source_id
+                    AND c.category_id = p.category_id
+                    AND c.type = p.type
+                    AND c.is_hidden = 1
+              )
+            ORDER BY _pfx DESC, name COLLATE NOCASE
+            LIMIT ?
+        `;
+        const params = [];
+        for (const t of ['live', 'movie', 'series']) {
+            params.push(prefix, pattern, perType);
+        }
+
+        const rows = db.prepare(`
+            SELECT source_id, item_id, name, stream_icon, type,
+                   container_extension, category_id, year, rating, data
+            FROM (
+                SELECT * FROM (${typed('live', 0)})
+                UNION ALL
+                SELECT * FROM (${typed('movie', 1)})
+                UNION ALL
+                SELECT * FROM (${typed('series', 2)})
+            )
+            ORDER BY _t, _pfx DESC, name COLLATE NOCASE
+        `).all(...params);
+
+        const formatted = rows.map(item => ({
+            ...item,
+            data: JSON.parse(item.data || '{}')
+        }));
+
+        res.json(formatted);
+    } catch (err) {
+        console.error('Error searching content:', err);
+        res.status(500).json({ error: 'Failed to search content' });
+    }
+});
+
 // Get recent movies or series
 router.get('/recent', async (req, res) => {
     try {

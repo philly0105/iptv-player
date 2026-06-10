@@ -31,6 +31,15 @@ class HomePage {
 
         pageHome.innerHTML = `
             <div class="dashboard-content" id="home-content">
+                <div class="home-search-bar">
+                    <div class="search-wrapper">
+                        <input type="text" id="home-search" class="search-input" autocomplete="off"
+                               placeholder="Search channels, movies & series...">
+                        <button type="button" class="search-clear" title="Clear search">&times;</button>
+                    </div>
+                </div>
+                <div id="home-search-results" class="movies-grid home-search-results" style="display:none;"></div>
+
                 <!-- Continue Watching section is created dynamically if watch history exists -->
 
                 <section class="dashboard-section" id="favorite-channels-section">
@@ -98,6 +107,123 @@ class HomePage {
 
         // Attach scroll arrow handlers
         this.initScrollArrows();
+
+        // Attach unified search
+        this.initSearch();
+    }
+
+    initSearch() {
+        const input = document.getElementById('home-search');
+        if (!input) return;
+
+        let timer = null;
+        input.addEventListener('input', () => {
+            clearTimeout(timer);
+            const q = input.value.trim();
+            // Debounce so we don't query on every keystroke.
+            timer = setTimeout(() => this.handleSearch(q), 250);
+        });
+
+        // This search bar is rendered dynamically, so the app-wide search-clear
+        // handler (bound once at startup) doesn't cover it — wire it here.
+        const clearBtn = input.closest('.search-wrapper')?.querySelector('.search-clear');
+        clearBtn?.addEventListener('click', () => {
+            clearTimeout(timer);
+            input.value = '';
+            input.focus();
+            this.handleSearch('');
+        });
+    }
+
+    async handleSearch(q) {
+        const results = document.getElementById('home-search-results');
+        if (!results || !this.container) return;
+
+        const sections = this.container.querySelectorAll('.dashboard-section');
+
+        if (q.length < 2) {
+            results.style.display = 'none';
+            results.innerHTML = '';
+            sections.forEach(s => { s.style.display = ''; });
+            return;
+        }
+
+        // Swap the browse sections for the results grid while a query is active.
+        sections.forEach(s => { s.style.display = 'none'; });
+        results.style.display = '';
+        results.innerHTML = '<div class="empty-state hint">Searching...</div>';
+
+        try {
+            const items = await window.API.channels.search(q);
+            // Ignore stale responses if the box changed while in flight.
+            const current = document.getElementById('home-search')?.value.trim() || '';
+            if (current !== q) return;
+            this.renderSearchResults(items);
+        } catch (err) {
+            console.error('[Dashboard] Search failed:', err);
+            results.innerHTML = '<div class="empty-state hint">Search failed</div>';
+        }
+    }
+
+    renderSearchResults(items) {
+        const results = document.getElementById('home-search-results');
+        if (!results) return;
+
+        if (!items || items.length === 0) {
+            results.innerHTML = '<div class="empty-state hint">No results found</div>';
+            return;
+        }
+
+        results.innerHTML = items.map((item, idx) => this.createSearchCard(item, idx)).join('');
+
+        results.querySelectorAll('.dashboard-card').forEach(card => {
+            card.addEventListener('click', () => {
+                const item = items[parseInt(card.dataset.idx, 10)];
+                if (!item) return;
+                const type = item.type || item.item_type;
+                if (type === 'live') {
+                    this.playSearchChannel(item);
+                } else if (type === 'series') {
+                    this.navigateToSeries(item);
+                } else {
+                    this.playItem(item);
+                }
+            });
+        });
+    }
+
+    createSearchCard(item, idx) {
+        const data = item.data || {};
+        const type = item.type || item.item_type;
+        const poster = item.stream_icon || data.poster || '/img/poster-placeholder.jpg';
+        const posterUrl = poster.startsWith('http') ? `/api/proxy/image?url=${encodeURIComponent(poster)}` : poster;
+        const typeLabel = type === 'live' ? 'Live TV' : type === 'movie' ? 'Movie' : 'Series';
+        const name = item.name || data.title || 'Unknown Title';
+
+        return `
+            <div class="dashboard-card" data-idx="${idx}">
+                <div class="card-image">
+                    <img src="${posterUrl}" alt="${name}" loading="lazy" onerror="this.onerror=null;this.src='/img/poster-placeholder.jpg'">
+                    <span class="card-type-badge">${typeLabel}</span>
+                    <div class="play-icon-overlay">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                    </div>
+                </div>
+                <div class="card-info">
+                    <div class="card-title" title="${name}">${name}</div>
+                    <div class="card-subtitle">${typeLabel}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    async playSearchChannel(item) {
+        const channelList = this.app.channelList;
+        if (channelList && (!channelList.channels || channelList.channels.length === 0)) {
+            await channelList.loadSources();
+            await channelList.loadChannels();
+        }
+        this.playChannel(item.item_id, item.source_id);
     }
 
     initScrollArrows() {
