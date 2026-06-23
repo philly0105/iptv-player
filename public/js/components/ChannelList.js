@@ -1213,6 +1213,24 @@ class ChannelList {
         // Play channel
         if (window.app?.player) {
             window.app.player.play(channel, streamUrl);
+            this.recordLiveWatch(channel);
+        }
+    }
+
+    async recordLiveWatch(channel) {
+        if (!channel) return;
+        // Fire-and-forget; never block playback on history write.
+        try {
+            await API.history.record(channel.id, channel.sourceId, {
+                title: channel.name,
+                icon: channel.tvgLogo || '',
+                streamId: channel.streamId || '',
+                sourceType: channel.sourceType || ''
+            });
+            // Refresh the recents cache so it's fresh next time the list renders.
+            if (this.loadRecents) await this.loadRecents();
+        } catch (err) {
+            console.warn('[History] Failed to record live watch:', err);
         }
     }
 
