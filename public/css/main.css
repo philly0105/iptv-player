@@ -5580,4 +5580,7 @@ textarea:focus {
   padding: 2px;
 }
 .group-header:hover .folder-fav-btn { opacity: 0.8; }
+
+.recently-watched .recents-header .group-name { font-weight: 600; }
+.recent-item { cursor: pointer; }
 .group-header .folder-fav-btn.active { opacity: 1; color: #f5a623; }

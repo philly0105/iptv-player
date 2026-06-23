@@ -20,6 +20,7 @@ class ChannelList {
         this.favorites = []; // Array of favorite objects
         this.visibleFavorites = new Set(); // Set<"sourceId:channelId">
         this.favoriteFolders = new Set(); // Set<categoryName> of favorited folders
+        this.recentsData = []; // Cached recent live-channel history rows (deduped, newest first)
         this.currentChannel = null;
         this.sources = [];
         this.isLoading = false;
@@ -423,6 +424,9 @@ class ChannelList {
         this.listContainer.className = 'channel-list-content';
         this.container.appendChild(this.listContainer);
 
+        // Prepend Recently Watched from cache (synchronous; no-op while searching).
+        this.renderRecentlyWatched(this.listContainer);
+
         // Add loader element at bottom
         this.loader = document.createElement('div');
         this.loader.className = 'batch-loader';
@@ -777,7 +781,8 @@ class ChannelList {
             // Load hidden items and favorites
             await Promise.all([
                 this.loadHiddenItems(),
-                this.loadFavorites()
+                this.loadFavorites(),
+                this.loadRecents()
             ]);
 
             this.render();
@@ -813,7 +818,8 @@ class ChannelList {
 
             await Promise.all([
                 this.loadHiddenItems(),
-                this.loadFavorites()
+                this.loadFavorites(),
+                this.loadRecents()
             ]);
             this.render();
         } catch (err) {
@@ -938,6 +944,87 @@ class ChannelList {
         } catch (err) {
             console.error('Error loading favorites:', err);
         }
+    }
+
+    async loadRecents() {
+        try {
+            const history = await API.history.getAll(50);
+            const live = (history || []).filter(r => r.item_type === 'channel');
+            const seen = new Set();
+            const rows = [];
+            for (const r of live) {
+                const key = `${r.source_id}:${r.item_id}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                rows.push(r);
+                if (rows.length >= 10) break;
+            }
+            this.recentsData = rows;
+        } catch (err) {
+            console.warn('[Recents] Failed to load history:', err);
+        }
+    }
+
+    formatRelativeTime(ts) {
+        const diff = Date.now() - Number(ts);
+        if (!isFinite(diff) || diff < 0) return '';
+        const m = Math.floor(diff / 60000);
+        if (m < 1) return 'just now';
+        if (m < 60) return `${m}m ago`;
+        const h = Math.floor(m / 60);
+        if (h < 24) return `${h}h ago`;
+        const d = Math.floor(h / 24);
+        return d === 1 ? 'yesterday' : `${d}d ago`;
+    }
+
+    renderRecentlyWatched(listContainer) {
+        // Only show recents in the default (non-search) view.
+        if (this.searchInput && this.searchInput.value.trim()) return;
+        const rows = this.recentsData || [];
+        if (rows.length === 0) return;
+
+        const collapsed = localStorage.getItem('iptv_player_recents_collapsed') === '1';
+        const section = document.createElement('div');
+        section.className = 'channel-group recently-watched';
+        section.innerHTML = `
+          <div class="group-header recents-header ${collapsed ? 'collapsed' : ''}">
+            <span class="group-toggle">${Icons.chevronDown}</span>
+            <span class="group-name">Recently Watched</span>
+            <span class="group-count">${rows.length}</span>
+          </div>
+          <div class="group-channels recents-body" ${collapsed ? 'style="display:none"' : ''}>
+            ${rows.map(r => {
+              const d = r.data || {};
+              const title = (d.title || r.item_id || 'Unknown');
+              const icon = d.icon || '';
+              return `
+                <div class="channel-item recent-item" data-channel-id="${r.item_id}" data-source-id="${r.source_id}">
+                  <img class="channel-logo" src="${this.getProxiedImageUrl(icon)}" alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+                  <div class="channel-info">
+                    <div class="channel-name">${this.escapeHtml(title)}</div>
+                    <div class="channel-program">${this.formatRelativeTime(r.updated_at)}</div>
+                  </div>
+                </div>`;
+            }).join('')}
+          </div>`;
+
+        // Collapse toggle
+        section.querySelector('.recents-header').addEventListener('click', () => {
+            const body = section.querySelector('.recents-body');
+            const nowCollapsed = !section.querySelector('.recents-header').classList.contains('collapsed');
+            section.querySelector('.recents-header').classList.toggle('collapsed', nowCollapsed);
+            body.style.display = nowCollapsed ? 'none' : '';
+            localStorage.setItem('iptv_player_recents_collapsed', nowCollapsed ? '1' : '0');
+        });
+
+        // Row click → play
+        section.querySelectorAll('.recent-item').forEach(item => {
+            item.addEventListener('click', () => {
+                this.selectChannel({ channelId: item.dataset.channelId, sourceId: item.dataset.sourceId });
+            });
+        });
+
+        listContainer.prepend(section);
     }
 
     isFolderFavorite(name) {
