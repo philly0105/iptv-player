@@ -343,9 +343,14 @@ class ChannelList {
         }
 
         // 4. Sort Groups and filter to only those with visible channels
+        const groupRank = (name) => {
+            if (this.isFolderFavorite(name)) return 0; // pinned favorited folders
+            if (name === 'Favorites') return 1;        // favorited-channels group
+            return 2;                                  // everything else
+        };
         const allGroups = Object.keys(groupedChannels).sort((a, b) => {
-            if (a === 'Favorites') return -1;
-            if (b === 'Favorites') return 1;
+            const ra = groupRank(a), rb = groupRank(b);
+            if (ra !== rb) return ra - rb;
             return a.localeCompare(b);
         });
 
@@ -368,7 +373,7 @@ class ChannelList {
         // This prevents rendering 100K+ channel items on initial load
         if (!this._hasCollapsedState && this.sortedGroups.length > 0) {
             this.sortedGroups.forEach(groupName => {
-                if (groupName !== 'Favorites') {
+                if (groupName !== 'Favorites' && !this.isFolderFavorite(groupName)) {
                     this.collapsedGroups.add(groupName);
                 }
             });
@@ -475,7 +480,7 @@ class ChannelList {
 
             // Default new groups to collapsed (except Favorites)
             // This handles groups loaded via scroll that weren't in the initial collapse
-            if (!isFavoritesGroup && !this.collapsedGroups.has(groupName) && !this._userExpandedGroups?.has(groupName)) {
+            if (!isFavoritesGroup && !this.isFolderFavorite(groupName) && !this.collapsedGroups.has(groupName) && !this._userExpandedGroups?.has(groupName)) {
                 this.collapsedGroups.add(groupName);
             }
 
