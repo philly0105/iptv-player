@@ -1358,6 +1358,7 @@ class ChannelList {
             });
             // Refresh the recents cache so it's fresh next time the list renders.
             if (this.loadRecents) await this.loadRecents();
+            this.render();
         } catch (err) {
             console.warn('[History] Failed to record live watch:', err);
         }

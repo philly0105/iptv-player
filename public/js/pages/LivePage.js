@@ -143,6 +143,9 @@ class LivePage {
         if (this.app.channelList.channels.length === 0) {
             await this.app.channelList.loadSources();
             await this.app.channelList.loadChannels();
+        } else {
+            await this.app.channelList.loadRecents();
+            this.app.channelList.render();
         }
     }
 
