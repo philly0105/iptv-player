@@ -490,9 +490,9 @@ class ChannelList {
 
             html += `
         <div class="channel-group">
-          <div class="group-header ${this.collapsedGroups.has(groupName) ? 'collapsed' : ''} ${isFavoritesGroup ? 'favorites-group' : ''} ${this.isFolderFavorite(groupName) ? 'folder-favorited' : ''}" data-group="${groupName}">
+          <div class="group-header ${this.collapsedGroups.has(groupName) ? 'collapsed' : ''} ${isFavoritesGroup ? 'favorites-group' : ''} ${this.isFolderFavorite(groupName) ? 'folder-favorited' : ''}" data-group="${this.escapeHtml(groupName)}">
             <span class="group-toggle">${Icons.chevronDown}</span>
-            <span class="group-name">${groupName}</span>
+            <span class="group-name">${this.escapeHtml(groupName)}</span>
             <span class="group-count">${visibleChannels.length}</span>
             ${isFavoritesGroup ? '' : `<button class="folder-fav-btn ${this.isFolderFavorite(groupName) ? 'active' : ''}" title="${this.isFolderFavorite(groupName) ? 'Unpin folder' : 'Pin folder to top'}">${this.isFolderFavorite(groupName) ? Icons.favorite : Icons.favoriteOutline}</button>`}
           </div>
