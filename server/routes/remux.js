@@ -15,7 +15,14 @@ const { safeUrl } = require('../middleware/validate');
  * Note: This does NOT fix Dolby/AC3 audio issues - use /api/transcode for that.
  */
 router.get('/', safeUrl('url'), async (req, res) => {
-    const { url } = req.query;
+    const { url, audioCodec } = req.query;
+
+    // AAC delivered in ADTS framing (common from Xtream movie endpoints, even when the
+    // URL ends in .mp4 — the stream is really MPEG-TS) must be converted to ASC or the
+    // MP4 muxer rejects it ("Malformed AAC bitstream" / "Operation not permitted") and
+    // ffmpeg aborts. Apply aac_adtstoasc ONLY for AAC — it breaks AC3/EAC3/MP3 — using
+    // the audio codec the caller already learned from /api/probe.
+    const isAac = typeof audioCodec === 'string' && audioCodec.toLowerCase().includes('aac');
 
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
 
@@ -58,9 +65,9 @@ router.get('/', safeUrl('url'), async (req, res) => {
         '-c', 'copy',
         // Ensure extradata is correctly extracted/converted (fixes Annex B -> AVCC issues in Firefox)
         '-bsf:v', 'dump_extra',
-        // NOTE: We intentionally do NOT use -bsf:a aac_adtstoasc here
-        // That filter only works for AAC audio and breaks AC3/EAC3/MP3.
-        // If AAC audio from MPEG-TS fails in MP4, use /api/transcode instead.
+        // Convert ADTS AAC -> ASC so the MP4 muxer accepts it. AAC ONLY — this filter
+        // breaks AC3/EAC3/MP3 — so it's gated on the probed audio codec (isAac).
+        ...(isAac ? ['-bsf:a', 'aac_adtstoasc'] : []),
         // Handle timestamp discontinuities at output
         '-fps_mode', 'passthrough',
         '-max_muxing_queue_size', '1024',

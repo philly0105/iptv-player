@@ -504,11 +504,30 @@ class WatchPage {
                     this.setVolumeFromStorage();
                     return;
                 } else if (info.needsRemux) {
-                    // Remux (container swap) currently doesn't use session logic, uses direct stream
-                    // TODO: Move remux to session logic if seeking is needed for TS files
+                    // VOD (movie/series/episode) is type-tagged; live TV is 'channel' (or untyped).
+                    const isVod = !!(this.content && this.content.type && this.content.type !== 'channel');
+                    if (isVod) {
+                        // VOD: route through the seekable HLS session (copy video — no re-encode)
+                        // instead of the progressive remux pipe, which can't seek/fast-forward.
+                        console.log('[WatchPage] Auto: VOD needs remux -> HLS copy session (seekable)');
+                        this.updateTranscodeStatus('remuxing', 'Remux (Auto)');
+                        const playlistUrl = await this.startTranscodeSession(url, {
+                            videoMode: 'copy',
+                            seekOffset: this.resumeTime,
+                            videoCodec: info.video,
+                            audioCodec: info.audio,
+                            audioChannels: info.audioChannels
+                        });
+                        this.playHls(playlistUrl);
+                        this.setVolumeFromStorage();
+                        return;
+                    }
+                    // Live TV: progressive remux pipe (seeking not applicable for live).
                     console.log('[WatchPage] Auto: Using remux (.ts container)');
                     this.updateTranscodeStatus('remuxing', 'Remux (Auto)');
-                    const finalUrl = `/api/remux?url=${encodeURIComponent(url)}`;
+                    // Pass the probed audio codec so remux can apply aac_adtstoasc for AAC
+                    // (ADTS AAC from TS sources is otherwise rejected by the MP4 muxer).
+                    const finalUrl = `/api/remux?url=${encodeURIComponent(url)}&audioCodec=${encodeURIComponent(info.audio || '')}`;
                     this.video.src = finalUrl;
                     this.video.play().catch(e => {
                         if (e.name !== 'AbortError') console.error('[WatchPage] Autoplay error:', e);
