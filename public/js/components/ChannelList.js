@@ -1356,9 +1356,9 @@ class ChannelList {
                 streamId: channel.streamId || '',
                 sourceType: channel.sourceType || ''
             });
-            // Refresh the recents cache so it's fresh next time the list renders.
+            // Refresh the recents cache so it's fresh next time the list renders
+            // (on tab show via LivePage.show, or the next natural render).
             if (this.loadRecents) await this.loadRecents();
-            this.render();
         } catch (err) {
             console.warn('[History] Failed to record live watch:', err);
         }
