@@ -2,7 +2,9 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const dataDir = path.join(__dirname, '..', '..', 'data');
+const dataDir = process.env.IPTV_DATA_DIR
+    ? process.env.IPTV_DATA_DIR
+    : path.join(__dirname, '..', '..', 'data');
 const dbPath = path.join(dataDir, 'content.db');
 
 // Ensure data directory exists

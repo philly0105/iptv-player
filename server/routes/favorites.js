@@ -23,7 +23,7 @@ router.post('/',
     validateBody({
         sourceId: { type: 'string', required: true, maxLength: 64 },
         itemId:   { type: 'string', required: true, maxLength: 256 },
-        itemType: { type: 'string', enum: ['channel', 'movie', 'series'], default: 'channel' },
+        itemType: { type: 'string', enum: ['channel', 'movie', 'series', 'category'], default: 'channel' },
     }),
     async (req, res) => {
     try {
@@ -41,7 +41,7 @@ router.delete('/',
     validateBody({
         sourceId: { type: 'string', required: true, maxLength: 64 },
         itemId:   { type: 'string', required: true, maxLength: 256 },
-        itemType: { type: 'string', enum: ['channel', 'movie', 'series'], default: 'channel' },
+        itemType: { type: 'string', enum: ['channel', 'movie', 'series', 'category'], default: 'channel' },
     }),
     async (req, res) => {
     try {
