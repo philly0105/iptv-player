@@ -26,11 +26,19 @@ In the Live TV tab, let the user:
 
 ## Decisions (from brainstorming)
 
-- **Layout:** Two pinned, collapsible sections at the top of the existing channel
-  list — `⭐ Favorites` and `🕘 Recently Watched` — above the normal folders.
-  (Matches the existing pinned-Favorites pattern.)
+- **Layout:** Top of the Live TV list, in order:
+  1. `🕘 Recently Watched` — a bespoke pinned, collapsible section (live channels).
+  2. **Favorited folders pinned in place** — favorited categories float to the top
+     as ordinary collapsible folders, each marked with a filled ⭐. They are *not*
+     wrapped in an extra "Favorites" header; they reuse the existing group renderer
+     untouched (this is the lower-risk option chosen over nesting sub-folders inside
+     a Favorites wrapper — same user value, far less churn in a hot batched renderer).
+  3. `⭐ Favorites` — the existing synthetic group holding favorited **channels**
+     (unchanged behavior).
+  4. Normal folders, alphabetical.
 - **Favorite scope:** Folders **and** channels. Existing per-channel favorites are
-  kept. Both appear under the `⭐ Favorites` section.
+  kept exactly as-is (their own `⭐ Favorites` group). Folder favorites are a new,
+  separate mechanism that pins whole categories.
 - **Recents scope:** Live channels only (newly tracked). Movie/series recents stay
   on the Home page as they are today.
 - **Folder-favorite storage:** Per-user in SQLite, reusing the existing `favorites`
@@ -55,9 +63,13 @@ The existing `favorites` table (`server/db/sqlite.js`) stores per-user favorites
 
 - `item_id` = the category key the list already groups/collapses by — i.e. the
   category **name** (`groupTitle`, the same string used for `collapsedGroups`).
-- `source_id` = the channel's source id.
+- `source_id` = **sentinel `0`**. Groups are keyed by name only in the UI (the same
+  category name can aggregate channels from multiple sources under "All Sources"),
+  and `collapsedGroups` is name-keyed. Using a fixed `source_id = 0` makes folder
+  favorites name-identified, matching the UI's grouping/collapse model. The column
+  is `INTEGER NOT NULL`, so `0` is valid.
 
-No schema migration needed (the column is free-text). Only validation enums change.
+No schema migration needed. Only the route validation enum changes.
 
 ### Live recents — reuse `watch_history` table
 
@@ -97,37 +109,47 @@ All in `public/js/components/ChannelList.js`, plus a small hook in
 ### ChannelList.js
 
 - **Load folder favorites:** alongside the existing channel-favorites load, fetch
-  `itemType=category` favorites into a `Set<"sourceId:categoryName">`.
-- **Folder favorite API:** `isFolderFavorite(sourceId, categoryName)` and
-  `toggleFolderFavorite(sourceId, categoryName)` (POST/DELETE `/api/favorites` with
-  `itemType:'category'`, optimistic UI update).
-- **Star on folder header:** render a ⭐ button in each `.group-header`, next to the
-  count. Click toggles favorite and stops propagation so it doesn't expand/collapse
+  `itemType=category` favorites into a `Set<categoryName>` (`this.favoriteFolders`).
+  (Keyed by name only — see Data model sentinel `source_id = 0`.)
+- **Folder favorite API:** `isFolderFavorite(categoryName)` and
+  `toggleFolderFavorite(categoryName)` — POST/DELETE `/api/favorites` with
+  `sourceId:'0', itemId:categoryName, itemType:'category'`; optimistic update of the
+  Set, then re-sort + re-render the list.
+- **Pin favorited folders in place:** in `render()`, the group sort comparator ranks
+  groups — favorited folders first (rank 0), the channel `Favorites` group next
+  (rank 1), all others alphabetical (rank 2). The default-collapse pass skips
+  favorited folders so they start expanded.
+- **Star on folder header:** render a ⭐ toggle button in each `.group-header`
+  (filled when favorited), `stopPropagation` on click so it doesn't collapse/expand
   the folder.
-- **Pinned sections** rendered above all real folders:
-  - **⭐ Favorites** — favorited folders rendered as expandable sub-folders
-    (reusing the normal folder render, showing that category's channels when
-    expanded) + favorited channels as flat rows. Hidden when empty.
-  - **🕘 Recently Watched** — fetch history, filter `type==='channel'`, de-dupe by
-    `sourceId:channelId` keeping newest, take 10. Render each with a relative
-    timestamp ("2m ago"); click plays from stored `streamUrl`/`data`. Hidden when
-    empty.
-- **Collapse state:** both sections collapsible; persist in `localStorage` like the
-  existing groups (extend the existing collapsed-groups mechanism with reserved keys
-  for the two synthetic sections). Default expanded.
-- **Source filter:** Favorites and Recents respect the active "All Sources" /
-  single-source filter, same as the rest of the list.
+- **🕘 Recently Watched section:** a bespoke block prepended to `listContainer`
+  (outside the batched group list). Fetch `GET /api/history?limit=50`, filter
+  `item_type==='channel'`, de-dupe by `sourceId:itemId` keeping newest, take 10.
+  Render each row (logo + name + relative time "2m ago"); click calls
+  `selectChannel({ channelId, sourceId })`. Collapsible; collapse state in
+  `localStorage` under a reserved key. Hidden when empty.
+- **Recents tracking hook:** in `selectChannel()`, after the channel is resolved,
+  fire a one-shot `POST /api/history` (see WatchPage note — implemented here, not in
+  WatchPage, since live playback is launched from `selectChannel`).
+- **Source filter:** pinned folders and the channel `Favorites` group already follow
+  the active source filter (they derive from `this.channels`). Recents show all
+  fetched live entries; when a single source is selected, recents whose `sourceId`
+  isn't the selected source are still listed but may not re-resolve a stream until
+  that source is active (acceptable — the user normally runs one source).
 
 ### WatchPage.js
 
-- On live-channel playback start, fire the `type:'channel'` history POST described
-  above. One-shot (not on the 10s interval). `saveProgress` is unchanged.
+- No change required. Live playback is launched via `ChannelList.selectChannel()`,
+  which is where the `type:'channel'` history POST is fired. `saveProgress` (which
+  skips live) is left untouched.
 
 ## Edge cases
 
-- **Play from recents:** entries carry `streamUrl` + `data`, so a recent channel
-  plays even if it's filtered out of / absent from the current view.
-- **De-dupe:** recents de-duped by `sourceId:channelId`, newest kept.
+- **Play from recents:** a recents row calls `selectChannel({ channelId, sourceId })`,
+  which resolves a fresh stream URL (it does not replay a stored, possibly-expired
+  URL). If the recent's source isn't in the currently loaded channel set,
+  `selectChannel` is a no-op — acceptable given single-source usage.
+- **De-dupe:** recents de-duped by `sourceId:itemId`, newest kept.
 - **Empty states:** sections render only when they have content (discoverability of
   folder-favoriting comes from the star on folder headers).
 - **Renamed/removed categories:** a folder favorite keyed by name simply stops
@@ -140,12 +162,13 @@ All in `public/js/components/ChannelList.js`, plus a small hook in
   - `GET /api/favorites?itemType=category` returns only category favorites.
   - History GET returns rows with `item_type='channel'` and recency ordering.
 - **Frontend (manual, in-app):**
-  - Star a folder → it appears under `⭐ Favorites`; unstar → it disappears.
-  - Favorited channel still appears under Favorites (no regression).
-  - Watch a live channel → it appears under `🕘 Recently Watched`; watch another →
+  - Star a folder → it jumps to the top with a filled ⭐ and starts expanded; unstar
+    → it returns to alphabetical position.
+  - Favorited channels still appear in the `⭐ Favorites` group (no regression).
+  - Watch a live channel → it appears in `🕘 Recently Watched`; watch another →
     ordering updates, de-duped.
   - Reload → folder favorites persist (server) and section collapse persists (local).
-  - Source filter narrows Favorites/Recents correctly.
+  - Clicking a recents row plays the channel.
 
 ## Out of scope
 
