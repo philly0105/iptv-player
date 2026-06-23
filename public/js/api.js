@@ -97,6 +97,18 @@ const API = {
             API.request('GET', `/favorites/check?sourceId=${sourceId}&itemId=${itemId}&itemType=${itemType}`)
     },
 
+    // Watch history
+    history: {
+        getAll: (limit = 50) => API.request('GET', `/history?limit=${limit}`),
+        record: (id, sourceId, data) =>
+            API.request('POST', '/history', {
+                id: String(id),
+                type: 'channel',
+                sourceId: sourceId != null ? String(sourceId) : undefined,
+                data
+            }),
+    },
+
     // Proxy
     proxy: {
         // Xtream
