@@ -19,6 +19,7 @@ class ChannelList {
         this._userExpandedGroups = new Set(); // Track groups user has explicitly expanded
         this.favorites = []; // Array of favorite objects
         this.visibleFavorites = new Set(); // Set<"sourceId:channelId">
+        this.favoriteFolders = new Set(); // Set<categoryName> of favorited folders
         this.currentChannel = null;
         this.sources = [];
         this.isLoading = false;
@@ -480,10 +481,11 @@ class ChannelList {
 
             html += `
         <div class="channel-group">
-          <div class="group-header ${this.collapsedGroups.has(groupName) ? 'collapsed' : ''} ${isFavoritesGroup ? 'favorites-group' : ''}" data-group="${groupName}">
+          <div class="group-header ${this.collapsedGroups.has(groupName) ? 'collapsed' : ''} ${isFavoritesGroup ? 'favorites-group' : ''} ${this.isFolderFavorite(groupName) ? 'folder-favorited' : ''}" data-group="${groupName}">
             <span class="group-toggle">${Icons.chevronDown}</span>
             <span class="group-name">${groupName}</span>
             <span class="group-count">${visibleChannels.length}</span>
+            ${isFavoritesGroup ? '' : `<button class="folder-fav-btn ${this.isFolderFavorite(groupName) ? 'active' : ''}" title="${this.isFolderFavorite(groupName) ? 'Unpin folder' : 'Pin folder to top'}">${this.isFolderFavorite(groupName) ? Icons.favorite : Icons.favoriteOutline}</button>`}
           </div>
           <div class="group-channels">
       `;
@@ -578,6 +580,15 @@ class ChannelList {
                 }
             });
             header.addEventListener('contextmenu', (e) => this.showContextMenu(e, 'group', header.dataset));
+        }
+
+        const folderFavBtn = groupEl.querySelector('.group-header .folder-fav-btn');
+        if (folderFavBtn) {
+            folderFavBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const groupName = groupEl.querySelector('.group-header').dataset.group;
+                this.toggleFolderFavorite(groupName);
+            });
         }
 
         groupEl.querySelectorAll('.channel-item').forEach(item => {
@@ -909,15 +920,41 @@ class ChannelList {
      */
     async loadFavorites() {
         try {
-            // Get all favorites (filtered for channels or legacy items without type)
+            // Channel favorites (existing behavior)
             const allFavs = await API.favorites.getAll();
             const channelFavs = allFavs.filter(f => !f.item_type || f.item_type === 'channel');
-
             this.visibleFavorites = new Set(
                 channelFavs.map(f => `${f.source_id}:${f.item_id || f.channel_id}`)
             );
+
+            // Folder (category) favorites — keyed by name only
+            const folderFavs = await API.favorites.getAll(null, 'category');
+            this.favoriteFolders = new Set(folderFavs.map(f => f.item_id));
         } catch (err) {
             console.error('Error loading favorites:', err);
+        }
+    }
+
+    isFolderFavorite(name) {
+        return this.favoriteFolders.has(name);
+    }
+
+    async toggleFolderFavorite(name) {
+        const wasFav = this.favoriteFolders.has(name);
+        // Optimistic
+        if (wasFav) this.favoriteFolders.delete(name);
+        else this.favoriteFolders.add(name);
+        // Re-render so the folder re-pins/un-pins and the star updates.
+        this.render();
+        try {
+            if (wasFav) await API.favorites.remove('0', name, 'category');
+            else await API.favorites.add('0', name, 'category');
+        } catch (err) {
+            console.error('Error toggling folder favorite:', err);
+            // Revert
+            if (wasFav) this.favoriteFolders.add(name);
+            else this.favoriteFolders.delete(name);
+            this.render();
         }
     }
 
