@@ -998,8 +998,8 @@ class ChannelList {
               const title = (d.title || r.item_id || 'Unknown');
               const icon = d.icon || '';
               return `
-                <div class="channel-item recent-item" data-channel-id="${r.item_id}" data-source-id="${r.source_id}">
-                  <img class="channel-logo" src="${this.getProxiedImageUrl(icon)}" alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+                <div class="channel-item recent-item" data-channel-id="${this.escapeHtml(String(r.item_id))}" data-source-id="${this.escapeHtml(String(r.source_id))}">
+                  <img class="channel-logo" src="${this.escapeHtml(this.getProxiedImageUrl(icon))}" alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
                   <div class="channel-info">
                     <div class="channel-name">${this.escapeHtml(title)}</div>
                     <div class="channel-program">${this.formatRelativeTime(r.updated_at)}</div>
