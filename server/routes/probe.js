@@ -40,8 +40,11 @@ function probeStream(url, ffprobePath, userAgent = null, timeout = 15000) {
             '-print_format', 'json',
             '-show_streams',
             '-show_format',
-            '-probesize', '5000000',
-            '-analyzeduration', '5000000',
+            // Trimmed from 5MB/5s: standard VOD codecs are identifiable in far less,
+            // and a slow HTTP provider makes the pre-roll download the dominant
+            // time-to-first-frame cost. Result is cached (L1 5min / L2 7 days) anyway.
+            '-probesize', '1500000',
+            '-analyzeduration', '2000000',
             url
         ];
 

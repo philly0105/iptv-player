@@ -231,27 +231,41 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Internal server error' });
 });
 
-// Seed a default Xtream source on first launch if env vars are set.
-// Set IPTV_DEFAULT_HOST / USER / PASS in .env — never committed to git.
+// Seed default sources if they don't already exist.
 async function seedDefaultSource() {
-    const host = process.env.IPTV_DEFAULT_HOST;
-    const username = process.env.IPTV_DEFAULT_USER;
-    const password = process.env.IPTV_DEFAULT_PASS;
-    if (!host || !username || !password) return;
     try {
         const db = require('./db');
         const existing = await db.sources.getAll();
-        if (existing.length > 0) return;
-        await db.sources.create({
-            name: process.env.IPTV_DEFAULT_NAME || 'My IPTV',
-            type: 'xtream',
-            url: host,
-            username,
-            password,
-        });
-        console.log('✓ Default IPTV source added');
+
+        // 1. Seed Free Global IPTV if not present
+        const hasGlobalIptv = existing.some(s => s.url === 'https://iptv-org.github.io/iptv/index.m3u');
+        if (!hasGlobalIptv) {
+            await db.sources.create({
+                name: 'Free Global IPTV (iptv-org)',
+                type: 'm3u',
+                url: 'https://iptv-org.github.io/iptv/index.m3u',
+            });
+            console.log('✓ Free Global IPTV source added');
+        }
+
+        // 2. Seed default Xtream source if database has no sources and env vars are set
+        if (existing.length === 0) {
+            const host = process.env.IPTV_DEFAULT_HOST;
+            const username = process.env.IPTV_DEFAULT_USER;
+            const password = process.env.IPTV_DEFAULT_PASS;
+            if (host && username && password) {
+                await db.sources.create({
+                    name: process.env.IPTV_DEFAULT_NAME || 'My IPTV',
+                    type: 'xtream',
+                    url: host,
+                    username,
+                    password,
+                });
+                console.log('✓ Default Xtream IPTV source added');
+            }
+        }
     } catch (err) {
-        console.warn('Could not seed default source:', err.message);
+        console.warn('Could not seed default sources:', err.message);
     }
 }
 
