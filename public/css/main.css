@@ -2,36 +2,36 @@
   * IPTV Player - Dark Theme Design System
   ===================================================== */
 
-/* CSS Variables */
+/* CSS Variables — Wolverine Design System */
 :root {
   /* iOS Safari toolbar compensation (set dynamically by JS) */
   --ios-ui-bottom: 0px;
 
-  /* Colors */
-  --color-bg-primary: #000000;
-  --color-bg-secondary: #080808;
-  --color-bg-tertiary: #111111;
-  --color-bg-hover: #1a1a1a;
-  --color-bg-active: #222222;
+  /* Colors — warm dark earth palette from Wolverine Worldwide */
+  --color-bg-primary: #080604;
+  --color-bg-secondary: #100d08;
+  --color-bg-tertiary: #18130d;
+  --color-bg-hover: #221910;
+  --color-bg-active: #2a2015;
 
-  --color-accent: #f59e0b;
-  --color-accent-hover: #fbbf24;
-  --color-accent-dim: rgba(245, 158, 11, 0.15);
+  --color-accent: #bf5f2a;
+  --color-accent-hover: #d4783d;
+  --color-accent-dim: rgba(191, 95, 42, 0.15);
 
-  --color-success: #10b981;
-  --color-warning: #f59e0b;
-  --color-error: #ef4444;
+  --color-success: #5a9e6f;
+  --color-warning: #c98830;
+  --color-error: #c44040;
 
-  --color-text-primary: #f1f1f5;
-  --color-text-secondary: #a1a1aa;
-  --color-text-muted: #71717a;
+  --color-text-primary: #f0ebe4;
+  --color-text-secondary: #a8937d;
+  --color-text-muted: #7a6856;
 
-  --color-border: #1c1c1e;
-  --color-border-light: #2c2c2e;
+  --color-border: #1e1710;
+  --color-border-light: #2a2018;
 
   /* Glass effect */
-  --glass-bg: rgba(0, 0, 0, 0.85);
-  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-bg: rgba(8, 6, 4, 0.90);
+  --glass-border: rgba(240, 235, 228, 0.08);
 
   /* Spacing */
   --space-xs: 4px;
@@ -42,16 +42,16 @@
   --space-2xl: 48px;
 
   /* Border Radius */
-  --radius-sm: 8px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
   --radius-full: 9999px;
 
   /* Shadows */
   --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 0 20px rgba(245, 158, 11, 0.25);
+  --shadow-glow: 0 0 20px rgba(191, 95, 42, 0.30);
 
   /* Transitions */
   --transition-fast: 150ms ease;
@@ -83,7 +83,7 @@
 html,
 body {
   height: 100%;
-  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Inter', 'DM Sans', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   font-size: 14px;
   line-height: 1.5;
   color: var(--color-text-primary);
@@ -4654,9 +4654,9 @@ kbd {
 }
 
 .user-badge-sso {
-  background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+  background: linear-gradient(135deg, #bf5f2a 0%, #d4783d 100%);
   color: #fff;
-  box-shadow: 0 2px 4px rgba(245, 158, 11, 0.3);
+  box-shadow: 0 2px 4px rgba(191, 95, 42, 0.3);
 }
 
 .user-badge-local {
@@ -4666,9 +4666,9 @@ kbd {
 }
 
 .user-badge-admin {
-  background: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);
+  background: linear-gradient(135deg, #bf5f2a 0%, #a8501f 100%);
   color: #000;
-  box-shadow: 0 2px 4px rgba(245, 158, 11, 0.3);
+  box-shadow: 0 2px 4px rgba(191, 95, 42, 0.3);
 }
 
 .user-badge-viewer {
@@ -4687,7 +4687,7 @@ kbd {
   gap: 8px;
   padding: 6px 14px;
   margin-right: var(--space-md);
-  background: linear-gradient(135deg, var(--color-accent) 0%, #fbbf24 100%);
+  background: linear-gradient(135deg, var(--color-accent) 0%, #d4783d 100%);
   border-radius: var(--radius-full);
   color: white;
   text-decoration: none;
@@ -4697,14 +4697,14 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 200px;
-  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+  box-shadow: 0 2px 8px rgba(191, 95, 42, 0.3);
   transition: transform var(--transition-fast), box-shadow var(--transition-fast);
   animation: now-playing-pulse 2s ease-in-out infinite;
 }
 
 .now-playing-indicator:hover {
   transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+  box-shadow: 0 4px 12px rgba(191, 95, 42, 0.4);
 }
 
 .now-playing-indicator.hidden {
