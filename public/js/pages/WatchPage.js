@@ -675,10 +675,11 @@ class WatchPage {
             return;
         }
 
+        // Reuse the player's highly optimized and stable HLS configuration, tailored for VOD
+        const baseConfig = this.app.player ? this.app.player.getHlsConfig() : {};
         this.hls = new Hls({
-            maxBufferLength: 30,
-            maxMaxBufferLength: 60,
-            startLevel: -1,
+            ...baseConfig,
+            startLevel: -1, // Bandwidth auto-detect for VOD
             enableWorker: true,
         });
 

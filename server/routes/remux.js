@@ -57,8 +57,8 @@ router.get('/', safeUrl('url'), async (req, res) => {
         '-i', url,
         // STRICT MAPPING: Only map video and audio, ignore subtitles/data/attachments
         // This prevents remux failure when source container has incompatible subtitle tracks (e.g. MKV -> MP4)
-        '-map', '0:v',
-        '-map', '0:a',
+        '-map', '0:v?',
+        '-map', '0:a?',
         // Drop subtitles (-sn) and data (-dn) explicitly
         '-sn', '-dn',
         // Copy streams without re-encoding

@@ -26,6 +26,11 @@ class SeriesPage {
         this.favoriteIds = new Set(); // Track favorite series IDs
         this.showFavoritesOnly = false;
 
+        // Hover prefetch: warm the probe cache before the user clicks Play
+        this.prefetchedKeys = new Set();
+        this.prefetchTimer = null;
+        this._autoTranscode = undefined; // lazily loaded from settings
+
         this.init();
     }
 
@@ -412,6 +417,13 @@ class SeriesPage {
 
             this.seasonsContainer.querySelectorAll('.episode-item').forEach(ep => {
                 ep.addEventListener('click', () => this.playEpisode(ep));
+                // Hover prefetch: warm the probe cache in background
+                ep.addEventListener('mouseenter', () => {
+                    this.prefetchTimer = setTimeout(() => this.prefetchEpisode(ep), 400);
+                });
+                ep.addEventListener('mouseleave', () => {
+                    clearTimeout(this.prefetchTimer);
+                });
             });
 
         } catch (err) {
@@ -514,6 +526,38 @@ class SeriesPage {
                 btn.classList.remove('active');
                 if (iconSpan) iconSpan.innerHTML = Icons.favoriteOutline;
             }
+        }
+    }
+
+    // Warm the probe cache for an episode in the background (fire-and-forget).
+    // Only runs when Auto Transcode is on, since that's the only play path that probes.
+    async prefetchEpisode(episodeEl) {
+        const episodeId = episodeEl.dataset.episodeId;
+        const sourceId = parseInt(episodeEl.dataset.sourceId);
+        const container = episodeEl.dataset.container || 'mp4';
+        
+        const key = `${sourceId}:${episodeId}`;
+        if (this.prefetchedKeys.has(key)) return;
+
+        // Lazily load the autoTranscode setting once
+        if (this._autoTranscode === undefined) {
+            try {
+                const settings = await API.settings.get();
+                this._autoTranscode = !!settings.autoTranscode;
+            } catch {
+                this._autoTranscode = false;
+            }
+        }
+        if (!this._autoTranscode) return;
+
+        this.prefetchedKeys.add(key); // mark optimistically to dedupe concurrent hovers
+        try {
+            const result = await API.proxy.xtream.getStreamUrl(sourceId, episodeId, 'series', container);
+            if (result?.url) {
+                await fetch(`/api/probe?url=${encodeURIComponent(result.url)}`);
+            }
+        } catch {
+            this.prefetchedKeys.delete(key); // allow a retry on a later hover
         }
     }
 }
