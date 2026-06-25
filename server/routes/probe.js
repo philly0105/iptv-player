@@ -95,9 +95,11 @@ function analyzeProbeResult(probeResult, url) {
     const audioCodec = audioStream?.codec_name?.toLowerCase() || 'unknown';
     const container = format.format_name?.toLowerCase() || 'unknown';
 
-    // Check codec compatibility
+    // Check codec compatibility — browsers only decode stereo (or mono) audio reliably
+    const audioChannels = audioStream?.channels || 0;
     const videoOk = BROWSER_VIDEO_CODECS.some(c => videoCodec.includes(c));
-    const audioOk = BROWSER_AUDIO_CODECS.some(c => audioCodec.includes(c));
+    const audioOk = BROWSER_AUDIO_CODECS.some(c => audioCodec.includes(c))
+        && (audioChannels <= 2 || audioChannels === 0);
 
     // Browser-safe containers
     // Note: We exclude 'webm' because ffprobe reports MKV as "matroska,webm", 
@@ -150,7 +152,8 @@ router.get('/', safeUrl('url'), async (req, res) => {
     const { url, ua } = req.query;
 
     const ffprobePath = req.app.locals.ffprobePath;
-    const cacheKey = `${url}${ua ? `|${ua}` : ''}`;
+    // v2: multi-channel audio (>2ch) is no longer marked browser-compatible
+    const cacheKey = `v2|${url}${ua ? `|${ua}` : ''}`;
 
     if (!ffprobePath) {
         // No ffprobe available - assume needs transcoding to be safe

@@ -86,7 +86,11 @@ router.get('/:sessionId/stream.m3u8', async (req, res) => {
         return res.status(404).json({ error: 'Session not found' });
     }
 
-    const playlist = await session.getPlaylist();
+    let playlist = await session.getPlaylist();
+    if (!playlist && (session.status === 'running' || session.status === 'starting')) {
+        await session.waitForPlaylist(20000);
+        playlist = await session.getPlaylist();
+    }
     if (!playlist) {
         return res.status(404).json({ error: 'Playlist not ready' });
     }
@@ -113,7 +117,11 @@ router.get('/:sessionId/:segment', async (req, res) => {
         return res.status(404).json({ error: 'Session not found' });
     }
 
-    const segmentPath = await session.getSegment(segment);
+    // FFmpeg writes segments incrementally — wait instead of 404 (404 causes HLS.js to restart)
+    let segmentPath = await session.getSegment(segment);
+    if (!segmentPath) {
+        segmentPath = await session.waitForSegment(segment);
+    }
     if (!segmentPath) {
         return res.status(404).json({ error: 'Segment not found' });
     }

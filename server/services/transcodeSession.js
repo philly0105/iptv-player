@@ -272,7 +272,9 @@ class TranscodeSession extends EventEmitter {
             );
         }
 
-        // HLS output options
+        // HLS output — event playlist (updated incrementally while encoding).
+        // Do NOT use -hls_playlist_type vod here: FFmpeg defers writing the m3u8 until
+        // the entire file is transcoded, leaving the player stuck with no manifest.
         args.push(
             '-f', 'hls',
             '-hls_time', String(SEGMENT_DURATION),
@@ -567,15 +569,67 @@ class TranscodeSession extends EventEmitter {
     }
 
     /**
+     * Append #EXT-X-ENDLIST when FFmpeg has finished
+     */
+    finalizePlaylist(content) {
+        if (!content) return null;
+        let playlist = content.trimEnd();
+        if ((this.status === 'stopped' || this.status === 'error') && !playlist.includes('#EXT-X-ENDLIST')) {
+            playlist += '\n#EXT-X-ENDLIST\n';
+        }
+        return playlist;
+    }
+
+    /**
+     * Build an HLS playlist from segment files on disk (fallback when FFmpeg
+     * hasn't flushed stream.m3u8 yet, or when using deferred VOD playlist mode)
+     */
+    async generatePlaylistFromSegments() {
+        let files;
+        try {
+            files = await fs.readdir(this.dir);
+        } catch {
+            return null;
+        }
+
+        const segments = files
+            .filter(f => /^seg\d+\.ts$/i.test(f))
+            .sort((a, b) => {
+                const numA = parseInt(a.match(/\d+/)[0], 10);
+                const numB = parseInt(b.match(/\d+/)[0], 10);
+                return numA - numB;
+            });
+
+        if (segments.length === 0) return null;
+
+        const targetDuration = Math.ceil(SEGMENT_DURATION);
+        let playlist = '#EXTM3U\n';
+        playlist += '#EXT-X-VERSION:3\n';
+        playlist += `#EXT-X-TARGETDURATION:${targetDuration}\n`;
+        playlist += '#EXT-X-MEDIA-SEQUENCE:0\n';
+        playlist += '#EXT-X-PLAYLIST-TYPE:EVENT\n';
+
+        for (const seg of segments) {
+            playlist += `#EXTINF:${SEGMENT_DURATION}.0,\n${seg}\n`;
+        }
+
+        return this.finalizePlaylist(playlist);
+    }
+
+    /**
      * Get the HLS playlist content
      */
     async getPlaylist() {
         this.touch();
         try {
-            return await fs.readFile(this.playlistPath, 'utf8');
-        } catch (err) {
-            return null;
+            const content = await fs.readFile(this.playlistPath, 'utf8');
+            if (content && content.includes('.ts')) {
+                return this.finalizePlaylist(content);
+            }
+        } catch {
+            // FFmpeg may not have written the manifest yet — fall through
         }
+        return this.generatePlaylistFromSegments();
     }
 
     /**
@@ -590,6 +644,25 @@ class TranscodeSession extends EventEmitter {
         } catch {
             return null;
         }
+    }
+
+    /**
+     * Wait for a segment file to appear (FFmpeg writes them incrementally)
+     */
+    async waitForSegment(segmentName, timeoutMs = 20000) {
+        const startTime = Date.now();
+        while (Date.now() - startTime < timeoutMs) {
+            const segmentPath = await this.getSegment(segmentName);
+            if (segmentPath) {
+                return segmentPath;
+            }
+            // Stop waiting if FFmpeg has finished and won't produce more segments
+            if (this.status === 'stopped' || this.status === 'error') {
+                return null;
+            }
+            await new Promise(resolve => setTimeout(resolve, 250));
+        }
+        return null;
     }
 
     /**

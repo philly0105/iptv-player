@@ -501,6 +501,7 @@ class WatchPage {
                         audioChannels: info.audioChannels
                     });
                     this.playHls(playlistUrl);
+                    this.startPlaybackWatchdog(url, 'hls-transcode');
                     this.setVolumeFromStorage();
                     return;
                 } else if (info.needsRemux) {
@@ -519,6 +520,7 @@ class WatchPage {
                             audioChannels: info.audioChannels
                         });
                         this.playHls(playlistUrl);
+                        this.startPlaybackWatchdog(url, 'hls-transcode');
                         this.setVolumeFromStorage();
                         return;
                     }
@@ -535,24 +537,7 @@ class WatchPage {
                     this.setVolumeFromStorage();
                     return;
                 }
-                // Compatible VOD MP4: skip Direct Play — IPTV CDN MP4s often have moov at end
-                const isVod = !!(this.content && this.content.type && this.content.type !== 'channel');
-                const isMp4 = /\.mp4(\?|$)/i.test(url) || (info.container && info.container.includes('mp4'));
-                if (isVod && isMp4) {
-                    console.log('[WatchPage] Auto: VOD MP4 -> HLS copy session (fast start)');
-                    this.updateTranscodeStatus('remuxing', 'Stream (FFmpeg)');
-                    const playlistUrl = await this.startTranscodeSession(url, {
-                        videoMode: 'copy',
-                        seekOffset: this.resumeTime,
-                        videoCodec: info.video,
-                        audioCodec: info.audio,
-                        audioChannels: info.audioChannels
-                    });
-                    this.playHls(playlistUrl);
-                    this.setVolumeFromStorage();
-                    return;
-                }
-                // Compatible - fall through to normal playback
+                // Compatible VOD — direct play first; stall timeout falls back to HLS session
                 console.log('[WatchPage] Auto: Using normal playback (compatible)');
             } catch (err) {
                 console.warn('[WatchPage] Probe failed, using normal playback:', err.message);
@@ -571,6 +556,7 @@ class WatchPage {
                 seekOffset: this.resumeTime
             });
             this.playHls(playlistUrl);
+            this.startPlaybackWatchdog(url, 'hls-transcode');
             this.setVolumeFromStorage();
             return;
         }
@@ -594,6 +580,7 @@ class WatchPage {
                 seekOffset: this.resumeTime
             });
             this.playHls(playlistUrl);
+            this.startPlaybackWatchdog(url, 'hls-transcode');
             this.setVolumeFromStorage();
             return;
         }
@@ -611,56 +598,26 @@ class WatchPage {
             return;
         }
 
-        // Determine if proxy is needed
+        // VOD always goes through the local proxy — handles CDN redirects, Range seeks,
+        // and avoids browser stalls on raw IPTV URLs that never time out client-side.
         const proxyRequiredDomains = ['pluto.tv'];
-        const needsProxy = settings.forceProxy || proxyRequiredDomains.some(domain => url.includes(domain));
-        const finalUrl = needsProxy ? `/api/proxy/stream?url=${encodeURIComponent(url)}` : url;
+        const isVod = !!(this.content && this.content.type && this.content.type !== 'channel');
+        const useProxy = settings.forceProxy
+            || isVod
+            || proxyRequiredDomains.some(domain => url.includes(domain));
+        const finalUrl = useProxy ? `/api/proxy/stream?url=${encodeURIComponent(url)}` : url;
 
-        console.log('[WatchPage] Playing:', { url, needsProxy, looksLikeHls });
+        console.log('[WatchPage] Playing:', { url, useProxy, looksLikeHls });
 
         // Use HLS.js for HLS streams
         if (looksLikeHls && Hls.isSupported()) {
             this.updateTranscodeStatus('direct', 'Direct HLS');
             this.playHls(finalUrl);
+            this.startPlaybackWatchdog(url, 'hls');
         } else {
             // Direct playback for mp4/mkv/avi
             this.updateTranscodeStatus('direct', 'Direct Play');
-
-            if (this.directPlayTimeout) {
-                clearTimeout(this.directPlayTimeout);
-                this.directPlayTimeout = null;
-            }
-
-            const fallbackResumeTime = this.resumeTime;
-            const STALL_TIMEOUT_MS = 8000; // 8 seconds before falling back
-
-            this.directPlayTimeout = setTimeout(async () => {
-                if (this.video && this.video.readyState < 1) {
-                    console.warn(`[WatchPage] Direct Play stalled after ${STALL_TIMEOUT_MS / 1000}s. Falling back to HLS copy session...`);
-                    this.updateTranscodeStatus('remuxing', 'Stalled -> Remuxing (Fallback)');
-
-                    // Stop direct playback to release resources
-                    this.video.pause();
-                    this.video.src = '';
-                    this.video.load();
-
-                    try {
-                        const playlistUrl = await this.startTranscodeSession(url, {
-                            videoMode: 'copy',
-                            seekOffset: fallbackResumeTime,
-                            videoCodec: this.currentStreamInfo?.video || 'h264',
-                            audioCodec: this.currentStreamInfo?.audio || 'aac',
-                            audioChannels: this.currentStreamInfo?.audioChannels || 2
-                        });
-                        console.log('[WatchPage] Fallback HLS session started:', playlistUrl);
-                        this.playHls(playlistUrl);
-                    } catch (fallbackErr) {
-                        console.error('[WatchPage] Fallback HLS session failed:', fallbackErr);
-                        this.updateTranscodeStatus('error', 'Playback Failed');
-                        this.hideLoading();
-                    }
-                }
-            }, STALL_TIMEOUT_MS);
+            this.startPlaybackWatchdog(url, 'direct');
 
             this.video.src = finalUrl;
             this.video.play().catch(e => {
@@ -669,6 +626,95 @@ class WatchPage {
         }
 
         this.setVolumeFromStorage();
+    }
+
+    /**
+     * Detect playback stalls (metadata loaded but video never starts, or HLS never plays)
+     * and fall back to a server-side HLS copy session.
+     */
+    startPlaybackWatchdog(sourceUrl, mode = 'direct') {
+        this.clearPlaybackWatchdog();
+        this._playbackStarted = false;
+        this._watchdogSourceUrl = sourceUrl;
+        this._watchdogMode = mode;
+
+        const onPlaying = () => {
+            this._playbackStarted = true;
+            this.clearPlaybackWatchdog();
+        };
+        this._watchdogOnPlaying = onPlaying;
+        this.video?.addEventListener('playing', onPlaying);
+
+        const isServerHls = mode === 'hls-transcode' || mode === 'hls-fallback';
+        const STALL_TIMEOUT_MS = isServerHls ? 45000 : 12000;
+        this.playbackWatchdogTimeout = setTimeout(() => this.handlePlaybackStall(), STALL_TIMEOUT_MS);
+    }
+
+    clearPlaybackWatchdog() {
+        if (this.playbackWatchdogTimeout) {
+            clearTimeout(this.playbackWatchdogTimeout);
+            this.playbackWatchdogTimeout = null;
+        }
+        if (this._watchdogOnPlaying && this.video) {
+            this.video.removeEventListener('playing', this._watchdogOnPlaying);
+            this._watchdogOnPlaying = null;
+        }
+        // Legacy direct-play-only timer
+        if (this.directPlayTimeout) {
+            clearTimeout(this.directPlayTimeout);
+            this.directPlayTimeout = null;
+        }
+    }
+
+    async handlePlaybackStall() {
+        if (this._playbackStarted || !this._watchdogSourceUrl) return;
+
+        const v = this.video;
+        const stalled = !v
+            || v.readyState < 1
+            || (v.readyState >= 1 && v.currentTime < 0.25 && !v.paused);
+
+        if (!stalled) return;
+
+        if (this._watchdogMode === 'hls-fallback' || this._watchdogMode === 'hls-transcode') {
+            console.error('[WatchPage] Server HLS transcode failed to start playback');
+            this.updateTranscodeStatus('error', 'Playback Failed');
+            this.hideLoading();
+            this.clearPlaybackWatchdog();
+            return;
+        }
+
+        console.warn(`[WatchPage] Playback stalled (${this._watchdogMode}). Falling back to HLS copy session...`);
+        this.clearPlaybackWatchdog();
+        this.updateTranscodeStatus('remuxing', 'Starting stream...');
+
+        if (this.hls) {
+            this.hls.destroy();
+            this.hls = null;
+        }
+        if (v) {
+            v.pause();
+            v.removeAttribute('src');
+            v.load();
+        }
+
+        const fallbackResumeTime = this.resumeTime;
+        try {
+            const playlistUrl = await this.startTranscodeSession(this._watchdogSourceUrl, {
+                videoMode: 'copy',
+                seekOffset: fallbackResumeTime,
+                videoCodec: this.currentStreamInfo?.video || 'h264',
+                audioCodec: this.currentStreamInfo?.audio || 'aac',
+                audioChannels: this.currentStreamInfo?.audioChannels || 2
+            });
+            console.log('[WatchPage] Fallback HLS session started:', playlistUrl);
+            this.playHls(playlistUrl);
+            this.startPlaybackWatchdog(this._watchdogSourceUrl, 'hls-fallback');
+        } catch (fallbackErr) {
+            console.error('[WatchPage] Fallback HLS session failed:', fallbackErr);
+            this.updateTranscodeStatus('error', 'Playback Failed');
+            this.hideLoading();
+        }
     }
 
     /**
@@ -693,11 +739,13 @@ class WatchPage {
         }
 
         const baseConfig = this.app.player ? this.app.player.getHlsConfig(url) : {};
+        const isTranscode = this.app.player?.isTranscodePlaylistUrl(url);
         this.hls = new Hls({
             ...baseConfig,
             startLevel: -1,
             enableWorker: true,
         });
+        this._hlsTranscodeRetries = 0;
 
         this.hls.loadSource(url);
         this.hls.attachMedia(this.video);
@@ -720,20 +768,44 @@ class WatchPage {
             this.populateQualityMenu();
         });
 
+        this.hls.on(Hls.Events.FRAG_BUFFERED, () => {
+            if (this.video && !this.video.paused && this.video.currentTime > 0) {
+                this._playbackStarted = true;
+                this.clearPlaybackWatchdog();
+                this.hideLoading();
+            }
+        });
+
         this.hls.on(Hls.Events.ERROR, (event, data) => {
-            if (data.fatal) {
-                if (data.type === Hls.ErrorTypes.NETWORK_ERROR && this.app.player?.isTranscodePlaylistUrl(url)) {
-                    console.log('[WatchPage] Transcode playlist not ready, retrying...');
-                    setTimeout(() => this.hls?.startLoad(), 500);
-                    return;
+            if (!data.fatal) return;
+
+            if (isTranscode && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                const manifestErrors = ['manifestLoadError', 'manifestParsingError', 'levelLoadError'];
+                const isManifestError = manifestErrors.includes(data.details);
+                const isFragError = data.details === 'fragLoadError' || data.details === 'fragLoadTimeOut';
+
+                if (isManifestError || isFragError) {
+                    this._hlsTranscodeRetries = (this._hlsTranscodeRetries || 0) + 1;
+                    if (this._hlsTranscodeRetries <= 30) {
+                        const resumeAt = this.video?.currentTime || 0;
+                        const delay = isManifestError ? 500 : 1000;
+                        console.log(`[WatchPage] Transcode ${data.details}, retry ${this._hlsTranscodeRetries}/30 at ${resumeAt.toFixed(1)}s`);
+                        setTimeout(() => {
+                            if (this.hls) {
+                                this.hls.startLoad(resumeAt > 0 ? resumeAt : -1);
+                            }
+                        }, delay);
+                        return;
+                    }
                 }
-                console.error('[WatchPage] HLS fatal error:', data);
-                if (!url.startsWith('/api/') && (data.type === Hls.ErrorTypes.NETWORK_ERROR)) {
-                    console.log('[WatchPage] Retrying via proxy...');
-                    this.playHls(`/api/proxy/stream?url=${encodeURIComponent(this.currentUrl)}`);
-                } else {
-                    this.hls.destroy();
-                }
+            }
+
+            console.error('[WatchPage] HLS fatal error:', data);
+            if (!url.startsWith('/api/') && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                console.log('[WatchPage] Retrying via proxy...');
+                this.playHls(`/api/proxy/stream?url=${encodeURIComponent(this.currentUrl)}`);
+            } else {
+                this.hls.destroy();
             }
         });
     }
@@ -745,10 +817,7 @@ class WatchPage {
     }
 
     stop() {
-        if (this.directPlayTimeout) {
-            clearTimeout(this.directPlayTimeout);
-            this.directPlayTimeout = null;
-        }
+        this.clearPlaybackWatchdog();
 
         // Stop history tracking and save final progress
         this.stopHistoryTracking();
@@ -939,11 +1008,7 @@ class WatchPage {
     }
 
     onMetadataLoaded() {
-        if (this.directPlayTimeout) {
-            console.log('[WatchPage] Direct Play successful, clearing stall timeout');
-            clearTimeout(this.directPlayTimeout);
-            this.directPlayTimeout = null;
-        }
+        // Metadata alone doesn't mean playback started — watchdog stays active until `playing`
 
         // Detect resolution
         if (this.video && this.video.videoHeight > 0) {
@@ -967,6 +1032,10 @@ class WatchPage {
     }
 
     onPlay() {
+        this._playbackStarted = true;
+        this.clearPlaybackWatchdog();
+        this.hideLoading();
+
         // Update play/pause button icons
         this.playPauseBtn?.querySelector('.icon-play')?.classList.add('hidden');
         this.playPauseBtn?.querySelector('.icon-pause')?.classList.remove('hidden');

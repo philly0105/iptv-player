@@ -149,10 +149,16 @@ class VideoPlayer {
             renderTextTracksNatively: true // Use native browser rendering for text tracks
         };
 
-        // Transcode sessions return before the playlist exists — poll until FFmpeg is ready
+        // Transcode VOD sessions: segments appear incrementally — tune retries and avoid live-edge behavior
         if (this.isTranscodePlaylistUrl(url)) {
             config.manifestLoadingMaxRetry = 24;
             config.manifestLoadingRetryDelay = 500;
+            config.fragLoadingMaxRetry = 24;
+            config.fragLoadingRetryDelay = 1000;
+            config.levelLoadingMaxRetry = 12;
+            // Disable live-sync heuristics that can snap playback back toward the playlist tail
+            config.liveSyncDurationCount = undefined;
+            config.liveMaxLatencyDurationCount = undefined;
         }
 
         return config;
