@@ -59,8 +59,7 @@
   --transition-slow: 350ms ease;
 
   /* Layout */
-  --nav-sidebar-width: 160px;
-  --nav-sidebar-width-collapsed: 52px;
+  --nav-sidebar-width: 52px;
   --sidebar-width: 320px;
   --epg-sidebar-width: 250px;
 
@@ -174,25 +173,17 @@ h4 {
   height: 100%;
   background: var(--color-bg-secondary);
   border-right: 1px solid var(--color-border);
-  transition: width var(--transition-normal), min-width var(--transition-normal);
-  overflow: hidden;
   z-index: 100;
   flex-shrink: 0;
-}
-
-.nav-sidebar.collapsed {
-  width: var(--nav-sidebar-width-collapsed);
-  min-width: var(--nav-sidebar-width-collapsed);
 }
 
 .nav-sidebar-header {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  justify-content: center;
   padding: var(--space-md);
   border-bottom: 1px solid var(--color-border);
   min-height: 56px;
-  overflow: hidden;
 }
 
 .brand-icon {
@@ -202,58 +193,26 @@ h4 {
   flex-shrink: 0;
 }
 
-.nav-sidebar.collapsed .brand-icon {
-  margin: 0 auto;
-}
-
-.brand-text {
-  font-family: 'Syne', sans-serif;
-  font-size: 1.1rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--color-accent);
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.version-badge {
-  font-size: 0.6rem;
-  font-weight: 600;
-  background: var(--color-accent);
-  color: #000;
-  padding: 2px 5px;
-  border-radius: 10px;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.nav-sidebar.collapsed .brand-text,
-.nav-sidebar.collapsed .version-badge {
-  display: none;
-}
-
 .nav-sidebar-nav {
   flex: 1;
   display: flex;
   flex-direction: column;
   padding: var(--space-sm);
-  gap: 2px;
-  overflow-y: auto;
-  overflow-x: hidden;
+  gap: 4px;
 }
 
 .nav-link {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
-  padding: 10px var(--space-sm);
+  justify-content: center;
+  width: 100%;
+  height: 40px;
   color: var(--color-text-secondary);
   text-decoration: none;
   border-radius: var(--radius-md);
   border-left: 3px solid transparent;
   transition: all var(--transition-fast);
-  white-space: nowrap;
-  overflow: hidden;
 }
 
 .nav-link:hover {
@@ -281,37 +240,59 @@ h4 {
   height: 18px;
 }
 
+/* Hover tooltip. Also used by .now-playing-text (Task 2 adds this class to
+   it) and wraps the version badge inside the Settings tooltip. The rail's
+   width is fixed, so this never needs JS positioning. */
 .nav-link-label {
-  font-size: 0.875rem;
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%) translateX(-4px);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-light);
+  box-shadow: var(--shadow-md);
+  font-size: 0.8rem;
   font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+  z-index: 150;
 }
 
-.nav-sidebar.collapsed .nav-link-label {
-  display: none;
+.nav-link:hover .nav-link-label,
+.nav-link:focus-visible .nav-link-label {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
 }
 
-.nav-sidebar.collapsed .nav-link {
-  justify-content: center;
-  padding: 10px;
-  border-left-color: transparent;
+.version-badge {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  background: var(--color-accent);
+  color: #000;
+  padding: 2px 5px;
+  border-radius: 10px;
+  white-space: nowrap;
 }
 
 .now-playing-indicator {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
-  padding: 10px var(--space-sm);
+  justify-content: center;
+  width: 100%;
+  height: 40px;
   color: var(--color-accent);
   text-decoration: none;
   border-radius: var(--radius-md);
   border-left: 3px solid var(--color-accent);
   background: var(--color-accent-dim);
-  font-size: 0.875rem;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
   animation: pulse-border 2s ease-in-out infinite;
 }
 
@@ -325,67 +306,26 @@ h4 {
   flex-shrink: 0;
 }
 
-.now-playing-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.nav-sidebar.collapsed .now-playing-indicator {
-  justify-content: center;
-  padding: 10px;
-  border-left-color: transparent;
-  border-radius: var(--radius-md);
-  animation: none;
-}
-
-.nav-sidebar.collapsed .now-playing-text {
-  display: none;
-}
-
 .nav-sidebar-bottom {
   display: flex;
   flex-direction: column;
   padding: var(--space-sm);
-  gap: 2px;
+  gap: 4px;
   border-top: 1px solid var(--color-border);
 }
 
-.nav-sidebar-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  padding: var(--space-sm);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-md);
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.nav-sidebar-toggle:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-hover);
-}
-
-.nav-sidebar-toggle svg {
-  width: 18px;
-  height: 18px;
-  transition: transform var(--transition-normal);
-}
-
-.nav-sidebar.collapsed .nav-sidebar-toggle svg {
-  transform: rotate(180deg);
-}
-
-/* Mobile nav sidebar — hidden off-screen, shown as drawer */
-.nav-sidebar-overlay {
+/* Mobile bottom tab bar & "More" sheet — replace the old drawer / overlay /
+   hamburger pattern entirely. Hidden on desktop. */
+.bottom-tab-bar {
   display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  z-index: 90;
+}
+
+.more-sheet-overlay {
+  display: none;
+}
+
+.more-sheet {
+  display: none;
 }
 
 @media (max-width: 767px) {
@@ -394,58 +334,117 @@ h4 {
   }
 
   .nav-sidebar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    height: 100%;
-    width: var(--nav-sidebar-width) !important;
-    min-width: var(--nav-sidebar-width) !important;
-    transform: translateX(-100%);
-    transition: transform var(--transition-normal);
-    z-index: 200;
-  }
-
-  .nav-sidebar.mobile-open {
-    transform: translateX(0);
-  }
-
-  .nav-sidebar-overlay.active {
-    display: block;
-  }
-
-  .nav-sidebar .nav-link-label {
-    display: block !important;
-  }
-
-  .nav-sidebar .nav-sidebar-toggle {
     display: none;
-  }
-
-  .mobile-menu-btn {
-    display: flex;
-    position: fixed;
-    top: var(--space-sm);
-    left: var(--space-sm);
-    z-index: 150;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    color: var(--color-text-primary);
-    cursor: pointer;
   }
 
   .main-content {
-    padding-top: 52px;
+    padding-bottom: calc(60px + var(--safe-area-inset-bottom));
   }
-}
 
-@media (min-width: 768px) {
-  .mobile-menu-btn {
-    display: none;
+  .bottom-tab-bar {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: calc(60px + var(--safe-area-inset-bottom));
+    padding-bottom: var(--safe-area-inset-bottom);
+    background: var(--color-bg-secondary);
+    border-top: 1px solid var(--color-border);
+    z-index: 200;
+  }
+
+  .tab-link {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: none;
+    border: none;
+    font-family: inherit;
+    color: var(--color-text-secondary);
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .tab-link.active {
+    color: var(--color-accent);
+  }
+
+  .tab-icon svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .tab-label {
+    font-size: 0.65rem;
+    font-weight: 500;
+  }
+
+  .more-sheet-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition-normal);
+    z-index: 190;
+  }
+
+  .more-sheet-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .more-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--color-bg-secondary);
+    border-top: 1px solid var(--color-border);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    padding: var(--space-sm);
+    padding-bottom: calc(60px + var(--space-sm) + var(--safe-area-inset-bottom));
+    transform: translateY(100%);
+    transition: transform var(--transition-normal);
+    pointer-events: none;
+    z-index: 201;
+  }
+
+  .more-sheet.active {
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  .more-sheet-handle {
+    width: 36px;
+    height: 4px;
+    margin: 4px auto 12px;
+    background: var(--color-border-light);
+    border-radius: var(--radius-full);
+  }
+
+  .more-sheet-link {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: 12px var(--space-sm);
+    color: var(--color-text-secondary);
+    text-decoration: none;
+    border-radius: var(--radius-md);
+  }
+
+  .more-sheet-link:hover,
+  .more-sheet-link:active {
+    background: var(--color-bg-hover);
+    color: var(--color-text-primary);
   }
 }
 
