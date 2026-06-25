@@ -1353,11 +1353,19 @@ video::cue {
 /* =====================================================
    Settings Page
    ===================================================== */
+#page-settings.active {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .settings-container {
   max-width: 900px;
   margin: 0 auto;
   padding: var(--space-lg);
-  height: calc(100vh - var(--navbar-height));
+  width: 100%;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
@@ -2633,7 +2641,6 @@ kbd {
   /* Settings Page - Mobile optimized */
   .settings-container {
     padding: var(--space-sm);
-    height: calc(100vh - var(--navbar-height));
   }
 
   .settings-container h2 {
