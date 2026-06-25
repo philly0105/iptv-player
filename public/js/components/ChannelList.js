@@ -1247,8 +1247,12 @@ class ChannelList {
      * Select and play a channel
      */
     async selectChannel(dataset) {
-        const channel = this.channels.find(c => c.id === dataset.channelId);
-        if (!channel) return;
+        console.log('[ChannelList] selectChannel called for:', dataset.channelId);
+        const channel = this.channels.find(c => String(c.id) === String(dataset.channelId));
+        if (!channel) {
+            console.warn('[ChannelList] Channel not found in list:', dataset.channelId);
+            return;
+        }
 
         this.currentChannel = channel;
         this.currentRenderId = dataset.renderId; // Track which visual instance is active

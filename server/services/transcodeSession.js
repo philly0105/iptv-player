@@ -214,7 +214,7 @@ class TranscodeSession extends EventEmitter {
         args.push('-i', this.url);
 
         // Map streams
-        args.push('-map', '0:v:0');
+        args.push('-map', '0:v:0?');
         args.push('-map', '0:a:0?');
 
         // Add video encoder and filters based on selected encoder OR copy

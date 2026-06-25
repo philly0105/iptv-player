@@ -197,7 +197,7 @@ router.get('/', safeUrl('url'), async (req, res) => {
         '-seekable', '0',
         '-i', url,
         // Map only first video and audio stream (avoid subtitle streams causing issues)
-        '-map', '0:v:0',
+        '-map', '0:v:0?',
         '-map', '0:a:0?', // ? makes audio optional if not present
         // Video: passthrough (no re-encoding = fast!)
         '-c:v', 'copy',
