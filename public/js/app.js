@@ -32,39 +32,25 @@ class App {
         // Check authentication first
         await this.checkAuth();
 
-        // Nav sidebar — desktop collapse toggle
-        const navSidebar = document.getElementById('nav-sidebar');
-        const navSidebarToggle = document.getElementById('nav-sidebar-toggle');
+        // Mobile bottom tab bar — "More" sheet
+        const moreTabBtn = document.getElementById('more-tab-btn');
+        const moreSheet = document.getElementById('more-sheet');
+        const moreSheetOverlay = document.getElementById('more-sheet-overlay');
 
-        if (navSidebar && navSidebarToggle) {
-            if (localStorage.getItem('navSidebarCollapsed') === 'true') {
-                navSidebar.classList.add('collapsed');
-            }
-
-            navSidebarToggle.addEventListener('click', () => {
-                navSidebar.classList.toggle('collapsed');
-                localStorage.setItem('navSidebarCollapsed', navSidebar.classList.contains('collapsed') ? 'true' : 'false');
-            });
-        }
-
-        // Nav sidebar — mobile drawer
-        const mobileMenuBtn = document.getElementById('mobile-menu-btn');
-        const navSidebarOverlay = document.getElementById('nav-sidebar-overlay');
-
-        const closeMobileNav = () => {
-            navSidebar?.classList.remove('mobile-open');
-            navSidebarOverlay?.classList.remove('active');
+        const closeMoreSheet = () => {
+            moreSheet?.classList.remove('active');
+            moreSheetOverlay?.classList.remove('active');
         };
 
-        mobileMenuBtn?.addEventListener('click', () => {
-            navSidebar?.classList.toggle('mobile-open');
-            navSidebarOverlay?.classList.toggle('active');
+        moreTabBtn?.addEventListener('click', () => {
+            moreSheet?.classList.toggle('active');
+            moreSheetOverlay?.classList.toggle('active');
         });
 
-        navSidebarOverlay?.addEventListener('click', closeMobileNav);
+        moreSheetOverlay?.addEventListener('click', closeMoreSheet);
 
-        document.querySelectorAll('.nav-link').forEach(link => {
-            link.addEventListener('click', closeMobileNav);
+        document.querySelectorAll('.more-sheet-link').forEach(link => {
+            link.addEventListener('click', closeMoreSheet);
         });
 
         // Channel drawer toggle (mobile)
@@ -116,8 +102,8 @@ class App {
             homeLayout?.classList.add('sidebar-collapsed');
         }
 
-        // Navigation handling
-        document.querySelectorAll('.nav-link').forEach(link => {
+        // Navigation handling — rail (desktop), bottom tabs + "More" sheet (mobile)
+        document.querySelectorAll('.nav-link, .tab-link[data-page], .more-sheet-link').forEach(link => {
             link.addEventListener('click', (e) => {
                 e.preventDefault();
                 this.navigateTo(link.dataset.page);
@@ -216,12 +202,11 @@ class App {
 
             this.currentUser = await response.json();
 
-            // Hide settings for viewers
+            // Hide settings for viewers (rail link + "More" sheet link)
             if (this.currentUser.role === 'viewer') {
-                const settingsLink = document.querySelector('.nav-link[data-page="settings"]');
-                if (settingsLink) {
-                    settingsLink.style.display = 'none';
-                }
+                document.querySelectorAll('[data-page="settings"]').forEach(link => {
+                    link.style.display = 'none';
+                });
             }
 
             // Add logout button to navbar
@@ -235,21 +220,9 @@ class App {
     }
 
     addLogoutButton() {
-        const navbar = document.querySelector('.nav-sidebar-bottom');
-        if (!navbar || document.getElementById('logout-btn')) return;
+        if (document.getElementById('logout-btn')) return;
 
-        const logoutLink = document.createElement('a');
-        logoutLink.href = '#';
-        logoutLink.className = 'nav-link';
-        logoutLink.id = 'logout-btn';
-        logoutLink.innerHTML = `
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
-                <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>
-            </svg></span>
-            <span>Logout</span>
-        `;
-
-        logoutLink.addEventListener('click', async (e) => {
+        const logoutHandler = async (e) => {
             e.preventDefault();
 
             const token = localStorage.getItem('authToken');
@@ -264,9 +237,42 @@ class App {
 
             localStorage.removeItem('authToken');
             window.location.replace('/login.html');
-        });
+        };
 
-        navbar.appendChild(logoutLink);
+        const logoutIconSvg = `
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>
+            </svg>
+        `;
+
+        // Rail (desktop)
+        const railNavbar = document.querySelector('.nav-sidebar-bottom');
+        if (railNavbar) {
+            const railLogout = document.createElement('a');
+            railLogout.href = '#';
+            railLogout.className = 'nav-link';
+            railLogout.id = 'logout-btn';
+            railLogout.innerHTML = `
+                <span class="nav-icon">${logoutIconSvg}</span>
+                <span class="nav-link-label">Logout</span>
+            `;
+            railLogout.addEventListener('click', logoutHandler);
+            railNavbar.appendChild(railLogout);
+        }
+
+        // "More" sheet (mobile)
+        const moreSheet = document.getElementById('more-sheet');
+        if (moreSheet) {
+            const sheetLogout = document.createElement('a');
+            sheetLogout.href = '#';
+            sheetLogout.className = 'more-sheet-link';
+            sheetLogout.innerHTML = `
+                <span class="nav-icon">${logoutIconSvg}</span>
+                <span>Logout</span>
+            `;
+            sheetLogout.addEventListener('click', logoutHandler);
+            moreSheet.appendChild(sheetLogout);
+        }
     }
 
     navigateTo(pageName, replaceHistory = false) {
@@ -284,10 +290,14 @@ class App {
             history.pushState({ page: pageName }, '', `#${pageName}`);
         }
 
-        // Update nav
-        document.querySelectorAll('.nav-link').forEach(link => {
+        // Update nav — rail, bottom tabs, and the "More" sheet all share data-page
+        document.querySelectorAll('[data-page]').forEach(link => {
             link.classList.toggle('active', link.dataset.page === pageName);
         });
+
+        // Highlight the "More" tab when the active page lives inside its sheet
+        const moreTabBtn = document.getElementById('more-tab-btn');
+        moreTabBtn?.classList.toggle('active', ['guide', 'recordings', 'multiview', 'settings'].includes(pageName));
 
         // Update pages
         document.querySelectorAll('.page').forEach(page => {
