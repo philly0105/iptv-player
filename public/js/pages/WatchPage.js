@@ -660,6 +660,19 @@ class WatchPage {
     playHls(url) {
         if (this.hls) {
             this.hls.destroy();
+            this.hls = null;
+        }
+
+        // Detect if the URL is a progressive stream (not HLS)
+        const isHlsUrl = url.includes('.m3u8') || url.includes('m3u8');
+
+        if (!isHlsUrl) {
+            console.log('[WatchPage] playHls received progressive stream URL. Playing directly on video element:', url);
+            this.video.src = url;
+            this.video.play().catch(e => {
+                if (e.name !== 'AbortError') console.error('[WatchPage] Autoplay error:', e);
+            });
+            return;
         }
 
         this.hls = new Hls({

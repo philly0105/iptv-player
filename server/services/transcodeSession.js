@@ -206,12 +206,12 @@ class TranscodeSession extends EventEmitter {
             '-reconnect_delay_max', '3'
         );
 
-        args.push('-i', this.url);
-
-        // Add seek offset if specified (as output option to avoid Range requests)
+        // Add seek offset if specified (as input option for fast demuxer-level seeking)
         if (this.options.seekOffset > 0) {
             args.push('-ss', String(this.options.seekOffset));
         }
+
+        args.push('-i', this.url);
 
         // Map streams
         args.push('-map', '0:v:0');
@@ -635,7 +635,21 @@ class TranscodeSession extends EventEmitter {
      * Delete session directory and all segments
      */
     async cleanup() {
-        this.stop();
+        if (this.process) {
+            const proc = this.process;
+            this.stop();
+            // Wait for the process to exit (up to 3 seconds) on Windows to release file locks
+            await new Promise(resolve => {
+                const timer = setTimeout(resolve, 3000);
+                proc.on('exit', () => {
+                    clearTimeout(timer);
+                    resolve();
+                });
+            });
+        } else {
+            this.status = 'stopped';
+        }
+
         try {
             await fs.rm(this.dir, { recursive: true, force: true });
             console.log(`[TranscodeSession ${this.id}] Cleaned up session directory`);
