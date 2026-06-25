@@ -608,6 +608,43 @@ class WatchPage {
         } else {
             // Direct playback for mp4/mkv/avi
             this.updateTranscodeStatus('direct', 'Direct Play');
+
+            if (this.directPlayTimeout) {
+                clearTimeout(this.directPlayTimeout);
+                this.directPlayTimeout = null;
+            }
+
+            const fallbackResumeTime = this.resumeTime;
+            const STALL_TIMEOUT_MS = 8000; // 8 seconds before falling back
+
+            this.directPlayTimeout = setTimeout(async () => {
+                if (this.video && this.video.readyState < 1) {
+                    console.warn(`[WatchPage] Direct Play stalled after ${STALL_TIMEOUT_MS / 1000}s. Falling back to HLS copy session...`);
+                    this.updateTranscodeStatus('remuxing', 'Stalled -> Remuxing (Fallback)');
+
+                    // Stop direct playback to release resources
+                    this.video.pause();
+                    this.video.src = '';
+                    this.video.load();
+
+                    try {
+                        const playlistUrl = await this.startTranscodeSession(url, {
+                            videoMode: 'copy',
+                            seekOffset: fallbackResumeTime,
+                            videoCodec: this.currentStreamInfo?.video || 'h264',
+                            audioCodec: this.currentStreamInfo?.audio || 'aac',
+                            audioChannels: this.currentStreamInfo?.audioChannels || 2
+                        });
+                        console.log('[WatchPage] Fallback HLS session started:', playlistUrl);
+                        this.playHls(playlistUrl);
+                    } catch (fallbackErr) {
+                        console.error('[WatchPage] Fallback HLS session failed:', fallbackErr);
+                        this.updateTranscodeStatus('error', 'Playback Failed');
+                        this.hideLoading();
+                    }
+                }
+            }, STALL_TIMEOUT_MS);
+
             this.video.src = finalUrl;
             this.video.play().catch(e => {
                 if (e.name !== 'AbortError') console.error('[WatchPage] Autoplay error:', e);
@@ -675,6 +712,11 @@ class WatchPage {
     }
 
     stop() {
+        if (this.directPlayTimeout) {
+            clearTimeout(this.directPlayTimeout);
+            this.directPlayTimeout = null;
+        }
+
         // Stop history tracking and save final progress
         this.stopHistoryTracking();
         this.saveProgress(true);
@@ -864,6 +906,12 @@ class WatchPage {
     }
 
     onMetadataLoaded() {
+        if (this.directPlayTimeout) {
+            console.log('[WatchPage] Direct Play successful, clearing stall timeout');
+            clearTimeout(this.directPlayTimeout);
+            this.directPlayTimeout = null;
+        }
+
         // Detect resolution
         if (this.video && this.video.videoHeight > 0) {
             this.currentStreamInfo = {
