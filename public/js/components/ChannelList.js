@@ -25,6 +25,8 @@ class ChannelList {
         this.sources = [];
         this.isLoading = false;
         this.renderedChannels = [];
+        this.prefetchedProbeKeys = new Set();
+        this.prefetchTimer = null;
 
         this.loadCollapsedState();
         this.init();
@@ -600,28 +602,7 @@ class ChannelList {
             });
         }
 
-        groupEl.querySelectorAll('.channel-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                if (e.target.closest('.favorite-btn') || e.target.closest('.multiview-add-btn')) return;
-                this.selectChannel(item.dataset);
-            });
-            item.addEventListener('contextmenu', (e) => this.showContextMenu(e, 'channel', item.dataset));
-
-            const favBtn = item.querySelector('.favorite-btn');
-            if (favBtn) {
-                favBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.toggleFavorite(parseInt(item.dataset.sourceId), item.dataset.channelId);
-                });
-            }
-            const multiviewBtn = item.querySelector('.multiview-add-btn');
-            if (multiviewBtn) {
-                multiviewBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this._openInMultiview(item.dataset.channelId);
-                });
-            }
-        });
+        groupEl.querySelectorAll('.channel-item').forEach(item => this.attachChannelItemListeners(item));
     }
 
     /**
@@ -684,29 +665,7 @@ class ChannelList {
 
         container.innerHTML = html;
 
-        // Attach listeners to the new channel items
-        container.querySelectorAll('.channel-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                if (e.target.closest('.favorite-btn') || e.target.closest('.multiview-add-btn')) return;
-                this.selectChannel(item.dataset);
-            });
-            item.addEventListener('contextmenu', (e) => this.showContextMenu(e, 'channel', item.dataset));
-
-            const favBtn = item.querySelector('.favorite-btn');
-            if (favBtn) {
-                favBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.toggleFavorite(parseInt(item.dataset.sourceId), item.dataset.channelId);
-                });
-            }
-            const multiviewBtn = item.querySelector('.multiview-add-btn');
-            if (multiviewBtn) {
-                multiviewBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this._openInMultiview(item.dataset.channelId);
-                });
-            }
-        });
+        container.querySelectorAll('.channel-item').forEach(item => this.attachChannelItemListeners(item));
     }
 
     /**
@@ -1219,28 +1178,68 @@ class ChannelList {
             </button>
         `;
 
-        // Attach listeners
-        div.addEventListener('click', (e) => {
-            if (e.target.closest('.favorite-btn') || e.target.closest('.multiview-add-btn')) return;
-            // Pass the render ID from the dataset
-            this.selectChannel({ ...div.dataset, renderId: div.dataset.renderId });
-        });
-        div.addEventListener('contextmenu', (e) => this.showContextMenu(e, 'channel', div.dataset));
+        this.attachChannelItemListeners(div);
 
-        const favBtn = div.querySelector('.favorite-btn');
+        return div;
+    }
+
+    /**
+     * Warm the probe cache on channel hover (same pattern as MoviesPage).
+     */
+    async prefetchChannelProbe(channel) {
+        if (!window.app?.player?.settings?.autoTranscode) return;
+
+        const key = `${channel.sourceId}:${channel.id}`;
+        if (this.prefetchedProbeKeys.has(key)) return;
+
+        this.prefetchedProbeKeys.add(key);
+        try {
+            let streamUrl = channel.url;
+            if (channel.sourceType === 'xtream') {
+                const streamFormat = window.app?.player?.settings?.streamFormat || 'm3u8';
+                const result = await API.proxy.xtream.getStreamUrl(
+                    channel.sourceId, channel.streamId, 'live', streamFormat
+                );
+                streamUrl = result?.url;
+            }
+            if (streamUrl) {
+                await fetch(`/api/probe?url=${encodeURIComponent(streamUrl)}`);
+            }
+        } catch {
+            this.prefetchedProbeKeys.delete(key);
+        }
+    }
+
+    attachChannelItemListeners(item) {
+        item.addEventListener('click', (e) => {
+            if (e.target.closest('.favorite-btn') || e.target.closest('.multiview-add-btn')) return;
+            this.selectChannel(item.dataset);
+        });
+        item.addEventListener('contextmenu', (e) => this.showContextMenu(e, 'channel', item.dataset));
+
+        item.addEventListener('mouseenter', () => {
+            const channel = this.channels.find(c => String(c.id) === String(item.dataset.channelId));
+            if (!channel) return;
+            clearTimeout(this.prefetchTimer);
+            this.prefetchTimer = setTimeout(() => this.prefetchChannelProbe(channel), 400);
+        });
+        item.addEventListener('mouseleave', () => clearTimeout(this.prefetchTimer));
+
+        const favBtn = item.querySelector('.favorite-btn');
         if (favBtn) {
             favBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.toggleFavorite(parseInt(div.dataset.sourceId), div.dataset.channelId);
+                this.toggleFavorite(parseInt(item.dataset.sourceId), item.dataset.channelId);
             });
         }
 
-        div.querySelector('.multiview-add-btn')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this._openInMultiview(channel.id);
-        });
-
-        return div;
+        const multiviewBtn = item.querySelector('.multiview-add-btn');
+        if (multiviewBtn) {
+            multiviewBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._openInMultiview(item.dataset.channelId);
+            });
+        }
     }
 
     /**

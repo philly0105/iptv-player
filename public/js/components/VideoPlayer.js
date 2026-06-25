@@ -110,8 +110,12 @@ class VideoPlayer {
     /**
      * Get HLS.js configuration with buffer settings optimized for stable playback
      */
-    getHlsConfig() {
-        return {
+    isTranscodePlaylistUrl(url) {
+        return typeof url === 'string' && url.includes('/api/transcode/');
+    }
+
+    getHlsConfig(url = null) {
+        const config = {
             enableWorker: true,
             // Buffer settings to prevent underruns during background tab throttling
             maxBufferLength: 30,           // Buffer up to 30 seconds of content
@@ -144,6 +148,14 @@ class VideoPlayer {
             enableWebVTT: true,            // Enable WebVTT subtitles
             renderTextTracksNatively: true // Use native browser rendering for text tracks
         };
+
+        // Transcode sessions return before the playlist exists — poll until FFmpeg is ready
+        if (this.isTranscodePlaylistUrl(url)) {
+            config.manifestLoadingMaxRetry = 24;
+            config.manifestLoadingRetryDelay = 500;
+        }
+
+        return config;
     }
 
     /**
@@ -1090,7 +1102,7 @@ class VideoPlayer {
                 // The HLS init logic is quite complex with error handling
                 // I'll inline the Hls init here as per original but mindful of proxy vs local
 
-                this.hls = new Hls(this.getHlsConfig());
+                this.hls = new Hls(this.getHlsConfig(finalUrl));
                 this.hls.loadSource(finalUrl);
                 this.hls.attachMedia(this.video);
 
@@ -1103,6 +1115,12 @@ class VideoPlayer {
                 // Re-attach error handler for the new Hls instance
                 this.hls.on(Hls.Events.ERROR, (event, data) => {
                     if (data.fatal) {
+                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && this.isTranscodePlaylistUrl(finalUrl)) {
+                            console.log('[Player] Transcode playlist not ready, retrying...');
+                            setTimeout(() => this.hls?.startLoad(), 500);
+                            return;
+                        }
+
                         const isCorsLikely = data.type === Hls.ErrorTypes.NETWORK_ERROR ||
                             (data.type === Hls.ErrorTypes.MEDIA_ERROR && data.details === 'fragParsingError');
 
@@ -1208,7 +1226,7 @@ class VideoPlayer {
             return;
         }
 
-        this.hls = new Hls(this.getHlsConfig());
+        this.hls = new Hls(this.getHlsConfig(url));
         this.hls.loadSource(url);
         this.hls.attachMedia(this.video);
 
@@ -1220,7 +1238,11 @@ class VideoPlayer {
 
         this.hls.on(Hls.Events.ERROR, (event, data) => {
             if (data.fatal) {
-                // Simple error handling for forced HLS/transcode modes
+                if (data.type === Hls.ErrorTypes.NETWORK_ERROR && this.isTranscodePlaylistUrl(url)) {
+                    console.log('[Player] Transcode playlist not ready, retrying...');
+                    setTimeout(() => this.hls?.startLoad(), 500);
+                    return;
+                }
                 console.error('Fatal HLS error in transcode mode:', data);
                 this.hls.destroy();
             }

@@ -660,24 +660,41 @@ router.get('/stream', proxyLimiter, safeUrl('url'), async (req, res) => {
                 return res.send(manifest);
             }
 
-            // Binary content (Video Segment or Key): Collect and send
-            console.log(`[Proxy] Serving binary content (${contentType})`);
+            // Binary content (video segments, progressive video, encryption keys)
             res.set('Content-Type', contentType || 'application/octet-stream');
 
-            // For small files (like encryption keys), collect all data and send at once
-            // This ensures proper Content-Length and response completion
-            const chunks = [firstChunk];
-            let result = await iterator.next();
-            while (!result.done) {
-                chunks.push(Buffer.from(result.value));
-                result = await iterator.next();
-            }
-            const fullContent = Buffer.concat(chunks);
+            // Small known-size payloads (e.g. HLS AES keys): buffer for reliability
+            const SMALL_BUFFER_MAX = 64 * 1024;
+            const parsedLength = contentLength ? parseInt(contentLength, 10) : NaN;
+            const isSmallKnownPayload = Number.isFinite(parsedLength) && parsedLength <= SMALL_BUFFER_MAX;
 
-            // Set Content-Length for proper client handling
-            res.set('Content-Length', fullContent.length);
-            res.send(fullContent);
-            return; // Success - exit the retry loop
+            if (isSmallKnownPayload) {
+                const chunks = [firstChunk];
+                let result = await iterator.next();
+                while (!result.done) {
+                    chunks.push(Buffer.from(result.value));
+                    result = await iterator.next();
+                }
+                const fullContent = Buffer.concat(chunks);
+                res.set('Content-Length', fullContent.length);
+                res.send(fullContent);
+                return;
+            }
+
+            // Stream segments and large payloads — don't buffer entire response in memory
+            res.write(firstChunk);
+            const bodyStream = Readable.from({
+                async *[Symbol.asyncIterator]() {
+                    let result = await iterator.next();
+                    while (!result.done) {
+                        yield result.value;
+                        result = await iterator.next();
+                    }
+                }
+            });
+            bodyStream.pipe(res);
+            req.on('close', () => bodyStream.destroy());
+            return;
 
         } catch (err) {
             lastError = err;

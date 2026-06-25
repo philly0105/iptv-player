@@ -61,14 +61,7 @@ router.post('/session', safeUrlBody('url'), async (req, res) => {
 
         await session.start();
 
-        // Wait for playlist to be ready (first segments generated)
-        const ready = await session.waitForPlaylist(15000);
-
-        if (!ready) {
-            await transcodeSession.removeSession(session.id);
-            return res.status(500).json({ error: 'Transcoding failed to start', reason: 'Playlist not generated in time' });
-        }
-
+        // Return immediately — HLS.js polls the playlist while FFmpeg warms up
         res.json({
             sessionId: session.id,
             playlistUrl: `/api/transcode/${session.id}/stream.m3u8`,

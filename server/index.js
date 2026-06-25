@@ -237,18 +237,7 @@ async function seedDefaultSource() {
         const db = require('./db');
         const existing = await db.sources.getAll();
 
-        // 1. Seed Free Global IPTV if not present
-        const hasGlobalIptv = existing.some(s => s.url === 'https://iptv-org.github.io/iptv/index.m3u');
-        if (!hasGlobalIptv) {
-            await db.sources.create({
-                name: 'Free Global IPTV (iptv-org)',
-                type: 'm3u',
-                url: 'https://iptv-org.github.io/iptv/index.m3u',
-            });
-            console.log('✓ Free Global IPTV source added');
-        }
-
-        // 2. Seed default Xtream source if database has no sources and env vars are set
+        // Seed default Xtream source if database has no sources and env vars are set
         if (existing.length === 0) {
             const host = process.env.IPTV_DEFAULT_HOST;
             const username = process.env.IPTV_DEFAULT_USER;

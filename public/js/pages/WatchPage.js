@@ -535,6 +535,23 @@ class WatchPage {
                     this.setVolumeFromStorage();
                     return;
                 }
+                // Compatible VOD MP4: skip Direct Play — IPTV CDN MP4s often have moov at end
+                const isVod = !!(this.content && this.content.type && this.content.type !== 'channel');
+                const isMp4 = /\.mp4(\?|$)/i.test(url) || (info.container && info.container.includes('mp4'));
+                if (isVod && isMp4) {
+                    console.log('[WatchPage] Auto: VOD MP4 -> HLS copy session (fast start)');
+                    this.updateTranscodeStatus('remuxing', 'Stream (FFmpeg)');
+                    const playlistUrl = await this.startTranscodeSession(url, {
+                        videoMode: 'copy',
+                        seekOffset: this.resumeTime,
+                        videoCodec: info.video,
+                        audioCodec: info.audio,
+                        audioChannels: info.audioChannels
+                    });
+                    this.playHls(playlistUrl);
+                    this.setVolumeFromStorage();
+                    return;
+                }
                 // Compatible - fall through to normal playback
                 console.log('[WatchPage] Auto: Using normal playback (compatible)');
             } catch (err) {
@@ -675,11 +692,10 @@ class WatchPage {
             return;
         }
 
-        // Reuse the player's highly optimized and stable HLS configuration, tailored for VOD
-        const baseConfig = this.app.player ? this.app.player.getHlsConfig() : {};
+        const baseConfig = this.app.player ? this.app.player.getHlsConfig(url) : {};
         this.hls = new Hls({
             ...baseConfig,
-            startLevel: -1, // Bandwidth auto-detect for VOD
+            startLevel: -1,
             enableWorker: true,
         });
 
@@ -706,9 +722,12 @@ class WatchPage {
 
         this.hls.on(Hls.Events.ERROR, (event, data) => {
             if (data.fatal) {
+                if (data.type === Hls.ErrorTypes.NETWORK_ERROR && this.app.player?.isTranscodePlaylistUrl(url)) {
+                    console.log('[WatchPage] Transcode playlist not ready, retrying...');
+                    setTimeout(() => this.hls?.startLoad(), 500);
+                    return;
+                }
                 console.error('[WatchPage] HLS fatal error:', data);
-                // Try proxy on CORS error (only if not already proxied/transcoded)
-                // Note: Transcoded streams are local, so no CORS issues usually
                 if (!url.startsWith('/api/') && (data.type === Hls.ErrorTypes.NETWORK_ERROR)) {
                     console.log('[WatchPage] Retrying via proxy...');
                     this.playHls(`/api/proxy/stream?url=${encodeURIComponent(this.currentUrl)}`);
