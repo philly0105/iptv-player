@@ -190,7 +190,8 @@ router.get('/', safeUrl('url'), async (req, res) => {
     console.log(`[Probe] Probing: ${url.substring(0, 80)}... ${ua ? `(UA: ${ua})` : ''}`);
 
     try {
-        const probeResult = await probeStream(url, ffprobePath, ua);
+        const resolvedUa = db.USER_AGENT_PRESETS[ua] || ua;
+        const probeResult = await probeStream(url, ffprobePath, resolvedUa);
         const analysis = analyzeProbeResult(probeResult, url);
 
         // Cache result (L1 memory + L2 persistent)

@@ -124,9 +124,9 @@ async function detectQuickSync() {
         let hasIntelGpu = false;
 
         if (os.platform() === 'win32') {
-            // Windows: Check via WMIC
+            // wmic removed in Windows 11 22H2+, use PowerShell CIM instead
             const result = execSync(
-                'wmic path win32_VideoController get name',
+                'powershell -NoProfile -Command "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"',
                 { timeout: 5000, encoding: 'utf-8', windowsHide: true }
             );
             hasIntelGpu = result.toLowerCase().includes('intel');
@@ -172,9 +172,9 @@ async function detectAMF() {
     }
 
     try {
-        // Windows: Check via WMIC for AMD/Radeon
+        // wmic removed in Windows 11 22H2+, use PowerShell CIM instead
         const result = execSync(
-            'wmic path win32_VideoController get name',
+            'powershell -NoProfile -Command "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"',
             { timeout: 5000, encoding: 'utf-8', windowsHide: true }
         );
 
